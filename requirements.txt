@@ -1,0 +1,5 @@
+numpy
+pandas
+matplotlib
+
+brpylib @ git+ssh://git@github.com/BlackrockNeurotech/Python-Utilities.git@main
