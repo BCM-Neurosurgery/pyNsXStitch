@@ -15,14 +15,40 @@ nsx_copy_headers = []
 REC_EVENT_PACKET_ID = 65529
 
 
-def get_nsx_duration(nsx_file):
+def get_nsx_duration(nsx_filepath):
     """Get the duration of this data file in seconds"""
-    nsx_data_size = os.path.getsize(nsx_file.datafile.name) - nsx_file.basic_header['BytesInHeader']
+    return get_nsx_end_time(nsx_filepath) - get_nsx_start_time(nsx_filepath)
+
+
+def iter_nsx_timestamps(nsx_file):
+    """Loop through and quickly read off all the packet headers in an NsX file"""
     data_point_size = nsx_file.basic_header["ChannelCount"] * DATA_BYTE_SIZE
 
-    n_data_points = nsx_data_size / data_point_size
-    duration = n_data_points / nsx_file.basic_header['SampleResolution']
-    return duration
+    ts_pointer = nsx_file.basic_header['BytesInHeader'] + 1
+    file_size = os.path.getsize(nsx_file.datafile.name)
+    while ts_pointer < file_size:
+        nsx_file.datafile.seek(ts_pointer, 1)
+        timestamp = unpack("<Q", nsx_file.datafile.read(8))[0]
+        packet_points = unpack("<I", nsx_file.datafile.read(4))[0]
+
+        yield timestamp, packet_points
+
+        ts_pointer = nsx_file.datafile.tell() + packet_points * data_point_size + 1
+
+
+def get_nsx_end_time(nsx_filepath):
+    """Return the end of the NsX file in time elapsed (seconds) since the recording start"""
+    nsx_file = NsxFile(nsx_filepath)
+    last_ts, packet_size = None, None
+    for timestamp, packet_points in iter_nsx_timestamps(nsx_filepath):
+        last_ts = timestamp
+        packet_size = packet_points
+
+    end_ts = last_ts + packet_size
+    sample_freq = nsx_file.basic_header['SampleResolution']
+
+    del nsx_file
+    return end_ts / sample_freq
 
 
 def get_nsx_start_time(nsx_filepath):
