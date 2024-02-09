@@ -67,25 +67,20 @@ def get_nsx_start_time(nsx_filepath):
 
 def find_files_in_range(nsx_filepaths, start, end):
     """Find all nsx files that contain data in the given range (time elapsed in seconds)"""
-    file_start = get_nsx_start_time(nsx_filepaths[0])
     in_range = False
     files = []
     for nsx_fp in nsx_filepaths:
-        nsx = NsxFile(nsx_fp)
-        duration = get_nsx_duration(nsx)
-        if file_start <= start < file_start + duration:
+        file_start = get_nsx_start_time(nsx_fp)
+        file_end = get_nsx_end_time(nsx_fp)
+        if file_start <= start < file_end:
             in_range = True
-        elif file_start < end <= file_start + duration:
+        elif file_start < end <= file_end:
             # We've found the end of the range, we can quit looping (but still include this file)
             files.append(nsx_fp)
             break
 
         if in_range:
             files.append(nsx_fp)
-
-        # Prepare to look at the next file
-        file_start += duration
-        del nsx
 
     return files
 
