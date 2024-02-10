@@ -85,14 +85,14 @@ class StitchedNsXFile(object):
 
     def iter_data(self):
         for file_i, filename in enumerate(self.files):
-            file_start, file_end = 0, -1  # By default, stream the entirety of each file
             nsx_file = NsxFile(filename)
-            if file_i == 0 and self.start_time is not None:
-                file_start = get_time_in_file(nsx_file, self.start_time)
-            elif file_i == len(self.files) and self.end_time is not None:
-                file_end = get_time_in_file(nsx_file, self.start_time)
+            file_streamer = stream_nsx_data(
+                nsx_file,
+                read_start_ts=self.start_time,
+                read_end_ts=self.end_time
+            )
 
-            for meta, data_block in stream_nsx_data(nsx_file, start_loc=file_start, end_loc=file_end):
+            for meta, data_block in file_streamer:
                 yield meta, data_block
 
     def parse_elec_ids(self):
