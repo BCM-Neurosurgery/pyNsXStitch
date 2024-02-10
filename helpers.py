@@ -167,7 +167,7 @@ def get_nev_rec_start(nev_file):
     return recording_start
 
 
-def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_ts=None, read_end_ts=None):
+def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_end_time=None):
     """
     This function is used to save a subset of data based on electrode IDs, file sizing, or file data time.  If
     both file_time_s and file_size are passed, it will default to file_time_s and determine sizing accordingly.
@@ -184,26 +184,12 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_ts=None, read_end
     """
 
     # Initializations
-    elec_id_indices = []
-    data_point_size = nsx_file.basic_header["ChannelCount"] * DATA_BYTE_SIZE
+    elec_id_indices = check_elecid(elec_ids)
+    ts_freq = nsx_file.basic_header['TimeStampResolution']
+    n_channels = nsx_file.basic_header["ChannelCount"]
+    data_point_size = n_channels * DATA_BYTE_SIZE
     nsx_file.datafile.seek(0, 0)
     section_size = (DATA_PAGING_SIZE // data_point_size) * data_point_size
-
-    # Run electrode id checks and set num_elecs
-    elec_ids = check_elecid(elec_ids)
-    if nsx_file.basic_header["FileSpec"] == "2.1":
-        all_elec_ids = nsx_file.basic_header["ChannelID"]
-    else:
-        all_elec_ids = [x["ElectrodeID"] for x in nsx_file.extended_headers]
-
-    if elec_ids == ELEC_ID_DEF:
-        elec_ids = all_elec_ids
-    else:
-        elec_ids = check_dataelecid(elec_ids, all_elec_ids)
-        if not elec_ids:
-            return None
-        else:
-            elec_id_indices = [all_elec_ids.index(x) for x in elec_ids]
 
     # Navigating headers to make sure we end up at the start of the data in the file
     end_of_header = nsx_file.basic_header["BytesInHeader"]
@@ -223,6 +209,8 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_ts=None, read_end
 
         # Determine whether we should read this packet from the file
         packet_end_ts = timestamp + packet_pts
+        read_start_ts = round(read_start_time * ts_freq) if read_start_time else None
+        read_end_ts = round(read_end_time * ts_freq) if read_end_time else None
         if read_start_ts and packet_end_ts < read_start_ts:
             continue  # This entire packet is before the read start timestamp. Move to the next packet
         if read_end_ts and read_end_ts < timestamp:
@@ -252,7 +240,7 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_ts=None, read_end
                 section_size = section_size
 
             num_pts = section_size // data_point_size
-            shape = (int(num_pts), nsx_file.basic_header["ChannelCount"])
+            shape = (int(num_pts), n_channels)
             memory_map = np.memmap(
                 nsx_file.datafile,
                 dtype=np.int16,

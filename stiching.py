@@ -76,23 +76,28 @@ class StitchedNeVFile(object):
 
 class StitchedNsXFile(object):
 
-    def __init__(self, files_to_stitch):
+    def __init__(self, files_to_stitch, start=None, end=None, elec_ids=ELEC_ID_DEF):
 
         self.files = files_to_stitch
-        self.start_time = None
-        self.end_time = None
-        self.elec_ids = ELEC_ID_DEF
+        self.start_time = start
+        self.end_time = end
+        self.elec_ids = elec_ids
 
     def iter_data(self):
+        """
+        Iterator that will loop over all the data packets in all the NsX files
+
+        See helpers.stream_nsx_data for details about how the data is streamed out from each individual file
+        """
         for file_i, filename in enumerate(self.files):
             nsx_file = NsxFile(filename)
-            file_streamer = stream_nsx_data(
+            streamer = stream_nsx_data(
                 nsx_file,
-                read_start_ts=self.start_time,
-                read_end_ts=self.end_time
+                read_start_time=self.start_time,
+                read_end_time=self.end_time,
+                elec_ids=self.parse_elec_ids()
             )
-
-            for meta, data_block in file_streamer:
+            for meta, data_block in streamer:
                 yield meta, data_block
 
     def parse_elec_ids(self):
