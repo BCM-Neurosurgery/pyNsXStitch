@@ -1,8 +1,8 @@
 import os
 import numpy as np
 import pandas as pd
-from stiching import StitchedNeVFile, NevFile
-from helpers import get_nev_rec_start
+from pyNsXStitch.stiching import StitchedNeVFile, NevFile
+from pyNsXStitch.helpers import get_nev_rec_start
 
 source_dir = r'D:\Work\DataNet\TestData\sources\blackrock\20240125-144340'
 out_path = r'D:\Work\DataNet\TestData\sources\blackrock\test.nev'
