@@ -1,11 +1,7 @@
 import os
-import pandas as pd
-import numpy as np
-from brpylib.brpylib import NevFile, NsxFile
-from helpers import search_nev_comments, find_files_in_range, get_nsx_duration
-from stiching import StitchedNsXFile
-from datetime import datetime
-
+from brpylib.brpylib import NevFile
+from pyNsXStitch.helpers import search_nev_comments, find_files_in_range
+from pyNsXStitch.stiching import StitchedNsXFile
 
 file_path = r'D:\Work\DataNet\TestData\sources\blackrock\20240125-144340'
 
@@ -18,7 +14,7 @@ print(start, stop)
 
 nsx_files = [os.path.join(file_path, f) for f in files if '.ns5' in f]
 relevant_nsx = find_files_in_range(nsx_files, start, stop)
-stitch = StitchedNsXFile(relevant_nsx)
+stitch = StitchedNsXFile(relevant_nsx, start, stop)
 
 out_path = r'D:\Work\DataNet\TestData\sources\blackrock\20240125-144340_test.ns5'
 with open(out_path, 'wb') as out_file:

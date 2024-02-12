@@ -6,7 +6,7 @@ from brpylib import NsxFile, NevFile
 from brpylib.brpylib import ELEC_ID_DEF, check_elecid, check_dataelecid, NSX_BASIC_HEADER_BYTES_22, \
     NSX_EXT_HEADER_BYTES_22
 
-from helpers import get_time_in_file, stream_nsx_data, stream_nev_packets
+from pyNsXStitch.streamers import stream_nev_packets, stream_nsx_data
 
 
 class StitchedNeVFile(object):

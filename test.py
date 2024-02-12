@@ -1,6 +1,6 @@
 import numpy as np
 from matplotlib import pyplot as plt
-from helpers import NsxFile
+from pyNsXStitch.helpers import NsxFile
 
 
 seconds = 2.0
