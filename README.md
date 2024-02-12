@@ -7,7 +7,7 @@ based on comments
 To install this as a python project you can use to perform custom stitching:
   - Make sure you have a python environment (conda recommended) install with python 3.10 or greater
   - Clone the repository
-    - ```git clone git@github.com:shethlab/NsXStitching-python.git```
+    - ```git clone git@github.com:shethlab/pyNsXStitch.git```
   - Then install all the requirements with
     - ```pip install -r requirements.txt```
   - Check out the included jupyter notebooks for usage instructions
@@ -20,7 +20,7 @@ Need to:
   - re-organize the directory structure 
 Eventually you will be able to include the following line in your requirements.txt:
 ```requirements
-git+ssh://git@github.com/shethlab/NsXStitching-python.git@main#egg=nsxstitch
+git+ssh://git@github.com/shethlab/pyNsXStitch.git@main#egg=pynsxstitch
 ```
 
 ## References
