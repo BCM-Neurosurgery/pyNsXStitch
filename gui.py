@@ -60,10 +60,11 @@ class StitcherGUI(object):
     def build_gui(self):
         """Initialize all the GUI elements and arrange everything"""
         top_row = self.build_top_row()
-        top_row.pack(side=tk.TOP)
+        top_row.pack(side=tk.TOP, anchor=tk.W)
         mid_row = self.build_mid_row()
-        mid_row.pack(side=tk.TOP)
-        # bot_row = self.build_bot_row()
+        mid_row.pack(side=tk.TOP, anchor=tk.W)
+        bot_row = self.build_bot_row()
+        mid_row.pack(side=tk.TOP, anchor=tk.W)
 
     def build_top_row(self):
         top_row_frame = tk.Frame(master=self.root)
@@ -111,7 +112,7 @@ class StitcherGUI(object):
         self.time_frame = tk.Frame(master=parent)
 
         # Build all the controls on the left side of the time select frame
-        inputs = tk.Frame(master=self.time_frame, width=50)
+        inputs = tk.Frame(master=self.time_frame, width=50, padx=10)
         tk.Label(master=inputs, text="Comment Search", ).pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
         tk.Entry(master=inputs, textvariable=self.search_text).pack(side=tk.TOP)
         buttons = tk.Frame(master=inputs)
@@ -221,6 +222,11 @@ class StitcherGUI(object):
                 button.configure(background=row_color)
 
     def update_ts_lims(self):
+        """Update the displayed values in the time range entry based on comment selection"""
+        ts_lims = np.array([self.start_timestamp.get(), self.end_timestamp.get()])
+        time_lims = (ts_lims - self.nev_start) / self.ts_freq
+        self.start_time.set(np.round(time_lims[0], 4))
+        self.end_time.set(np.round(time_lims[1], 4))
         self.recolor_table()
 
     def update_tlims(self):
@@ -233,7 +239,11 @@ class StitcherGUI(object):
         self.recolor_table()
 
     def reset_tlims(self):
-        pass
+        self.start_timestamp.set(0)
+        self.end_timestamp.set(0)
+        self.start_time.set(0.0)
+        self.end_time.set(0.0)
+        self.recolor_table()
 
     def search_comments(self):
         search_text = self.search_text.get()
@@ -250,9 +260,10 @@ class StitcherGUI(object):
 
     def rebuild_comments(self):
         if self.comment_frame:
+            self.table_elements = []
             self.comment_frame.destroy()
 
-        self.comment_frame = tk.Frame(master=self.time_frame, padx=10, height=300, borderwidth=1)
+        self.comment_frame = tk.Frame(master=self.time_frame, pady=10, padx=20, height=300, borderwidth=1)
         self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL)
         self.scroll.pack(side=tk.RIGHT, fill='y')
         self.build_comment_table()
@@ -273,6 +284,9 @@ class StitcherGUI(object):
         })
         self.full_comment_df = cleaned_df
         self.reset_comments()
+
+    def build_bot_row(self):
+        pass
 
 
 if __name__ == '__main__':
