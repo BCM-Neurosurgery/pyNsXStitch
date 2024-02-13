@@ -3,6 +3,7 @@ Based on
 """
 
 import os
+import re
 from brpylib.brpylib import *
 from struct import unpack
 
@@ -12,6 +13,33 @@ from pyNsXStitch.streamers import stream_nev_packets
 
 nsx_copy_headers = []
 REC_EVENT_PACKET_ID = 65529
+
+
+def get_all_streamed_files(directory, full_paths=False):
+    """
+    Find all the streamed blackrock toc mode files in a directory
+
+    This includes all NsX and NeV files. No other metadata files are included.
+
+    :param directory:
+    :return: dictionary of file names keyed by blackrock file type
+    """
+    files = {
+        "NeV": [],
+    }
+    all_files = os.listdir(directory)
+    for file_path in all_files:
+        file_path = os.path.join(directory, file_path) if full_paths else file_path
+        if file_path.endswith(".nev"):
+            files['NeV'].append(file_path)
+        nsx_match = re.match(r'\.ns([0-9])$', file_path)
+        if nsx_match:
+            nsx_num = int(nsx_match.group(1))
+            file_type = f'Ns{nsx_num}'
+            if file_type not in files:
+                files[file_type] = []
+            files[file_type].append(file_path)
+    return files
 
 
 def get_nsx_duration(nsx_filepath):
@@ -99,8 +127,8 @@ def get_time_in_file(nsx_file, timestamp):
     return time_in_file
 
 
-def search_nev_comments(nev_filenames, task_name):
-    """Helper function to search for the start and end of a task in a NeV file"""
+def get_all_nev_comments(nev_filenames):
+    """Get a data frame of all the comments in the listed NeV files"""
     nev_files = [NevFile(fp) for fp in nev_filenames]
 
     # Read in all the comments from all the files
@@ -110,6 +138,12 @@ def search_nev_comments(nev_filenames, task_name):
         easy_read = pd.DataFrame.from_dict(nev_data['comments'])
         all_easy_read.append(easy_read)
     easy_read = pd.concat(all_easy_read)
+    return easy_read
+
+
+def search_nev_comments(nev_filenames, task_name):
+    """Helper function to search for the start and end of a task in a NeV file"""
+    easy_read = get_all_nev_comments(nev_filenames)
 
     # Select our the timestamps of the relevant start and end comment
     match = easy_read[[task_name in desc for desc in easy_read['Data']]]
