@@ -1,10 +1,13 @@
+import os
+import sys, traceback
 import tkinter as tk
 from tkinter import filedialog
 
 import numpy as np
 import pandas as pd
 from brpylib import NevFile
-from pyNsXStitch.helpers import get_all_nev_comments, get_all_streamed_files, get_nev_rec_start
+from pyNsXStitch.stitchers import StitchedNsXFile, StitchedNeVFile
+from pyNsXStitch.helpers import get_all_nev_comments, get_all_streamed_files, get_nev_rec_start, find_nsx_in_range
 
 
 class StitcherGUI(object):
@@ -44,7 +47,6 @@ class StitcherGUI(object):
         self.notify('Ready')
         self.root.mainloop()
 
-
     def init_window(self):
         root = tk.Tk()
         try:
@@ -53,7 +55,7 @@ class StitcherGUI(object):
             root.state('zoomed')
         root.title('Manual Time Alignment')
         root.geometry("500x500")
-        # tk.Tk.report_callback_exception = self.show_error
+        tk.Tk.report_callback_exception = self.disp_error
         return root
 
     def init_comments(self):
@@ -225,6 +227,7 @@ class StitcherGUI(object):
         self.scroll.config(command=self.table_area.yview)
 
     def recolor_table(self):
+        """Update the colors of the rows in the comment table without re-building"""
         for rox_idx, row_elements in enumerate(self.table_elements):
             row_ts = self.comment_df.iloc[rox_idx, 0]
             row_color = self.get_row_color(rox_idx, row_ts)
@@ -261,6 +264,7 @@ class StitcherGUI(object):
         self.recolor_table()
 
     def search_comments(self):
+        """Search for and display only a subset of the comments based on comment text"""
         search_text = self.search_text.get()
         have_match = np.array([
             search_text in comment
@@ -274,6 +278,7 @@ class StitcherGUI(object):
         self.rebuild_comments()
 
     def rebuild_comments(self):
+        """Build the comment dataframe section of the GUI from scratch"""
         if self.comment_frame:
             self.table_elements = []
             self.comment_frame.destroy()
@@ -287,7 +292,10 @@ class StitcherGUI(object):
 
     def load_dir(self):
         """Load all the NeV comments into memory, trigger populating the comment frame"""
+        self.notify(f'Loading data in: {self.source_dir.get()}')
         self.streamed_files = get_all_streamed_files(self.source_dir.get(), full_paths=True)
+        self.notify(f'Found {len(self.streamed_files["NeV"])} NeV files')
+        self.notify(f'Loading comments from NeV...')
         raw_df = get_all_nev_comments(self.streamed_files['NeV'])
         first_nev = NevFile(self.streamed_files['NeV'][0])
         self.nev_start = get_nev_rec_start(first_nev)
@@ -299,15 +307,21 @@ class StitcherGUI(object):
         })
         self.full_comment_df = cleaned_df
         self.reset_comments()
+        self.notify(f'Finished loading comments. \n Ready for time selection...\n\n')
 
     def build_bot_row(self):
         bot_row = tk.Frame(master=self.root, padx=10, pady=10)
 
+        # Build the console window
         console_frame = tk.Frame(master=bot_row, width=110, height=10, padx=5)
-        self.console = tk.Text(master=console_frame, width=100, height=10,  state='disabled')
+        self.console = tk.Text(master=console_frame, width=100, height=12,  state='disabled')
         self.console.pack(side=tk.LEFT)
         console_frame.pack(side=tk.LEFT)
 
+        # Add formatting to the console
+        self.console.tag_configure('error', foreground='red')
+
+        # Add the master action buttons
         button_width = 15
         button_frame = tk.Frame(master=bot_row, padx=10)
         stitch_button = tk.Button(
@@ -333,25 +347,88 @@ class StitcherGUI(object):
 
         return bot_row
 
-    def write_to_console(self, message, color='black'):
+    def write_to_console(self, message, tags=(), pad_newline=True):
+        """Universal function for adding text to the log console"""
+        if pad_newline:
+            message = f'{message}\n'
         self.console['state'] = 'normal'
-        self.console.insert('end', f'{message}\n')
+        self.console.insert('end', message, tags)
         self.console['state'] = 'disabled'
+        self.console.see('end')
 
     def notify(self, message):
+        """Write a generic non-tagged message to the console"""
         self.write_to_console(message)
 
+    def disp_error(self, exec, val, tb):
+        """Display a caught error with traceback in the console"""
+        formatted = traceback.format_exception(exec, val, tb)
+        for line in formatted:
+            self.write_to_console(line, tags=('error',), pad_newline=False)
+        self.notify('Process aborted')
+
     def error(self, message):
-        self.write_to_console(message, color='red')
+        """Display a short error message in the console"""
+        self.write_to_console(message, tags=('error',))
+
+    def get_out_filepath(self, filetype):
+        filename = f'{self.file_name}.{filetype}'
+        path = os.path.join(self.output_dir.get(), filename)
+        return path
 
     def do_stitch(self):
-        print(f'Do stitch')
+        """
+        Run the stitching based on current GUI state
+        :return:
+        """
+        # Overall initialization
+        self.notify(f'Starting stitching process')
+        start, end = self.start_time.get(), self.end_time.get()
+        try:
+            os.makedirs(self.output_dir.get(), exist_ok=True)
+        except FileNotFoundError:
+            self.error('Could not find the selected output directory!\n'
+                       '  Are you sure it has been selected correctly?\n')
+            return
+
+        # Stitch the NeV files first
+        self.notify('Stitching NeV files...')
+        nev_stitch = StitchedNeVFile(self.streamed_files['NeV'])
+        with open(self.get_out_filepath('nev'), 'wb') as nev_out:
+            nev_stitch.write(nev_out)
+        self.notify('Stitched NeV file complete')
+
+        # Stitch each of the NsX filetypes
+        self.notify('Beginning NsX stitching...')
+        nsx_files = {filetype: files for filetype, files in self.streamed_files if 'ns' in filetype}
+        for filetype, files in nsx_files:
+            self.notify(f'Stitching {len(files)} {filetype} files')
+            in_range = find_nsx_in_range(files, start, end)
+            self.notify(f'Found {len(in_range)} files in the selected time range')
+            if in_range:
+                nsx_stitch = StitchedNsXFile(in_range, start, end)
+                # TODO: should we show a progressbar here?
+                with open(self.get_out_filepath(filetype.lower()), 'wb') as nsx_out:
+                    nsx_stitch.write(nsx_out)
+                self.notify('Finished stitching NsX files')
+            else:
+                self.error('Could not find enough files to stitch!')
+                continue
+        self.notify('Stitching complete. \n')
 
     def full_reset(self):
-        print('Full reset')
+        """Reset all GUI elements and variables to their default values"""
+        self.source_dir.set("/")
+        self.output_dir.set("/")
+        self.reset_tlims()
+        self.full_comment_df = self.init_comments()
+        self.reset_comments()
+        self.notify('Reset complete. Ready to load data \n')
 
     def close_and_exit(self):
-        print(f'Close and exit')
+        self.notify('Exiting.')
+        exit()
+
 
 if __name__ == '__main__':
     gui = StitcherGUI()
