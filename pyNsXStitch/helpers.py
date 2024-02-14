@@ -92,7 +92,7 @@ def get_nsx_start_time(nsx_filepath):
         del nsx
 
 
-def find_files_in_range(nsx_filepaths, start, end):
+def find_nsx_in_range(nsx_filepaths, start, end):
     """Find all nsx files that contain data in the given range (time elapsed in seconds)"""
     in_range = False
     files = []
