@@ -15,10 +15,10 @@ class StitchedNeVFile(object):
     create_file_loc = 8 + 2*2 + 4*4 + 16
     basic_header_size = create_file_loc + 32 + 256 + 4
 
-    def __init__(self, files_to_stitch):
+    def __init__(self, files_to_stitch, start=None, end=None):
         self.files = files_to_stitch
-        self.start_time = None
-        self.end_time = None
+        self.start_time = start
+        self.end_time = end
         self.skip_packet_ids = None
 
     def get_max_packet_size(self):
