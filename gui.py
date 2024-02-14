@@ -36,9 +36,14 @@ class StitcherGUI(object):
         self.comment_frame = None
         self.table_elements = []
         self.table_area = None
+        self.console = None
 
         self.build_gui()
+
+        self.notify('Stitcher GUI version 0.1')
+        self.notify('Ready')
         self.root.mainloop()
+
 
     def init_window(self):
         root = tk.Tk()
@@ -64,7 +69,7 @@ class StitcherGUI(object):
         mid_row = self.build_mid_row()
         mid_row.pack(side=tk.TOP, anchor=tk.W)
         bot_row = self.build_bot_row()
-        mid_row.pack(side=tk.TOP, anchor=tk.W)
+        bot_row.pack(side=tk.TOP, anchor=tk.W)
 
     def build_top_row(self):
         top_row_frame = tk.Frame(master=self.root)
@@ -72,7 +77,13 @@ class StitcherGUI(object):
         # Build the inputs for loading the source data in
         source_frame = tk.Frame(master=top_row_frame)
         self.build_directory_select(source_frame, 'Source Directory', self.source_dir)
-        load_btn = tk.Button(master=source_frame, text='Load', width=20, command=self.load_dir)
+        load_btn = tk.Button(
+            master=source_frame,
+            text='Load',
+            width=20,
+            command=self.load_dir,
+            background='steelblue1'
+        )
         load_btn.pack(side=tk.LEFT)
         source_frame.pack(side=tk.TOP, anchor=tk.W)
 
@@ -221,6 +232,10 @@ class StitcherGUI(object):
             for button in row_elements[1:]:
                 button.configure(background=row_color)
 
+        if self.start_timestamp.get() > self.end_timestamp.get() > 0.0:
+            self.error('WARNING: The start timestamp is greater than the end timestamp!\n'
+                       '  This will result in no data being selected')
+
     def update_ts_lims(self):
         """Update the displayed values in the time range entry based on comment selection"""
         ts_lims = np.array([self.start_timestamp.get(), self.end_timestamp.get()])
@@ -286,8 +301,57 @@ class StitcherGUI(object):
         self.reset_comments()
 
     def build_bot_row(self):
-        pass
+        bot_row = tk.Frame(master=self.root, padx=10, pady=10)
 
+        console_frame = tk.Frame(master=bot_row, width=110, height=10, padx=5)
+        self.console = tk.Text(master=console_frame, width=100, height=10,  state='disabled')
+        self.console.pack(side=tk.LEFT)
+        console_frame.pack(side=tk.LEFT)
+
+        button_width = 15
+        button_frame = tk.Frame(master=bot_row, padx=10)
+        stitch_button = tk.Button(
+            button_frame,
+            text='Stitch',
+            background='steelblue1',
+            command=self.do_stitch,
+            width=button_width,
+            pady=2,
+        )
+        stitch_button.pack(side=tk.TOP, pady=10)
+        reset_button = tk.Button(button_frame, text='Reset', command=self.full_reset, width=button_width, pady=2)
+        reset_button.pack(side=tk.TOP, pady=10)
+        exit_button = tk.Button(
+            button_frame,
+            text='Exit',
+            background='lightcoral',
+            command=self.close_and_exit,
+            width=button_width,
+            pady=2)
+        exit_button.pack(side=tk.TOP, pady=10)
+        button_frame.pack(side=tk.LEFT)
+
+        return bot_row
+
+    def write_to_console(self, message, color='black'):
+        self.console['state'] = 'normal'
+        self.console.insert('end', f'{message}\n')
+        self.console['state'] = 'disabled'
+
+    def notify(self, message):
+        self.write_to_console(message)
+
+    def error(self, message):
+        self.write_to_console(message, color='red')
+
+    def do_stitch(self):
+        print(f'Do stitch')
+
+    def full_reset(self):
+        print('Full reset')
+
+    def close_and_exit(self):
+        print(f'Close and exit')
 
 if __name__ == '__main__':
     gui = StitcherGUI()
