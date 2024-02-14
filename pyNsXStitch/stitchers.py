@@ -62,7 +62,7 @@ class StitchedNeVFile(object):
         # Set the file pointer to the end of the header, so we are ready to write packets
         out_file.seek(origin.basic_header['BytesInHeader'], 0)
 
-    def write_data(self, out_file):
+    def write(self, out_file):
 
         self.write_headers(out_file)
 
@@ -149,7 +149,7 @@ class StitchedNsXFile(object):
             else:
                 origin.datafile.seek(62, 1)
 
-    def write_data(self, out_file):
+    def write(self, out_file):
 
         self.write_headers(out_file)
 
