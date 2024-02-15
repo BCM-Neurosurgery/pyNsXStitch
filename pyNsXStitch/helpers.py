@@ -4,6 +4,8 @@ Based on
 
 import os
 import re
+import warnings
+
 from brpylib.brpylib import *
 from struct import unpack
 
@@ -32,7 +34,7 @@ def get_all_streamed_files(directory, full_paths=False):
         file_path = os.path.join(directory, file_path) if full_paths else file_path
         if file_path.endswith(".nev"):
             files['NeV'].append(file_path)
-        nsx_match = re.match(r'\.ns([0-9])$', file_path)
+        nsx_match = re.search(r'\.ns([0-9])$', file_path)
         if nsx_match:
             nsx_num = int(nsx_match.group(1))
             file_type = f'Ns{nsx_num}'
@@ -92,7 +94,7 @@ def get_nsx_start_time(nsx_filepath):
         del nsx
 
 
-def find_nsx_in_range(nsx_filepaths, start, end):
+def find_nsx_in_range(nsx_filepaths, start, end, subtract_offset=False):
     """Find all nsx files that contain data in the given range (time elapsed in seconds)"""
     in_range = False
     files = []
@@ -133,9 +135,17 @@ def get_all_nev_comments(nev_filenames):
 
     # Read in all the comments from all the files
     all_easy_read = []
-    for nev_file in nev_files:
-        nev_data = nev_file.getdata()
-        easy_read = pd.DataFrame.from_dict(nev_data['comments'])
+    for i, nev_file in enumerate(nev_files):
+        try:
+            nev_data = nev_file.getdata()
+        except (ValueError, IndexError):
+            warnings.warn(f'Could not read NeV file! Is it empty? \n  {nev_filenames[i]}')
+            continue
+        try:
+            easy_read = pd.DataFrame.from_dict(nev_data['comments'])
+        except KeyError:
+            warnings.warn(f'Found no comments in NeV file! \n  {nev_filenames[i]}')
+            continue
         all_easy_read.append(easy_read)
     easy_read = pd.concat(all_easy_read)
     return easy_read
@@ -151,8 +161,9 @@ def search_nev_comments(nev_filenames, task_name):
     start, end = match['TimeStamps'].iloc[1], match['TimeStamps'].iloc[2]
 
     # Convert the timestamps to seconds since the start of the recording
-    rec_origin = get_nev_rec_start(nev_files[0])
-    ts_per_sec = nev_files[0].basic_header['TimeStampResolution']
+    nev_file = NevFile(nev_filenames[0])
+    rec_origin = get_nev_rec_start(nev_file)
+    ts_per_sec = nev_file.basic_header['TimeStampResolution']
     start_s, end_s = round(start/ts_per_sec, 6), round(end/ts_per_sec, 6)
     return start_s, end_s
 
