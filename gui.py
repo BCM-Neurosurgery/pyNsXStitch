@@ -1,8 +1,9 @@
 import os
 import sys, traceback
+import warnings
 import tkinter as tk
 from tkinter import filedialog
-
+from datetime import datetime
 import numpy as np
 import pandas as pd
 from brpylib import NevFile
@@ -18,8 +19,8 @@ class StitcherGUI(object):
         self.root = self.init_window()
 
         # Variables used for tracking the GUI state
-        self.source_dir = tk.StringVar(self.root, value=r'D:\Work\DataNet\TestData\sources\blackrock\20240125-144340')
-        self.output_dir = tk.StringVar(self.root, value=None)
+        self.source_dir = tk.StringVar(self.root, value=r'D:\Work\DataNet\TestData\sources\blackrock\20240130-122352')
+        self.output_dir = tk.StringVar(self.root, value=r'D:\Work\DataNet\TestData\sources\blackrock\testing')
         self.search_text = tk.StringVar(self.root, value='')
         self.file_name = tk.StringVar(self.root, value='stitched')
         self.start_time = tk.DoubleVar(master=self.root, value=None)
@@ -56,6 +57,7 @@ class StitcherGUI(object):
         root.title('Manual Time Alignment')
         root.geometry("500x500")
         tk.Tk.report_callback_exception = self.disp_error
+        warnings.showwarning = self.show_warning
         return root
 
     def init_comments(self):
@@ -266,6 +268,7 @@ class StitcherGUI(object):
     def search_comments(self):
         """Search for and display only a subset of the comments based on comment text"""
         search_text = self.search_text.get()
+        self.notify(f'Searching {len(self.full_comment_df)} comments')
         have_match = np.array([
             search_text in comment
             for comment in self.full_comment_df['Comment']
@@ -289,6 +292,7 @@ class StitcherGUI(object):
         self.build_comment_table()
 
         self.comment_frame.pack(side=tk.LEFT, anchor=tk.N)
+        self.notify(f'Showing {len(self.comment_df)} matching comments')
 
     def load_dir(self):
         """Load all the NeV comments into memory, trigger populating the comment frame"""
@@ -296,18 +300,24 @@ class StitcherGUI(object):
         self.streamed_files = get_all_streamed_files(self.source_dir.get(), full_paths=True)
         self.notify(f'Found {len(self.streamed_files["NeV"])} NeV files')
         self.notify(f'Loading comments from NeV...')
-        raw_df = get_all_nev_comments(self.streamed_files['NeV'])
-        first_nev = NevFile(self.streamed_files['NeV'][0])
-        self.nev_start = get_nev_rec_start(first_nev)
-        self.ts_freq = first_nev.basic_header['TimeStampResolution']
-        cleaned_df = pd.DataFrame.from_dict({
-            'Timestamp': raw_df['TimeStamps'],
-            'Time Elapsed': np.round((raw_df['TimeStamps'] - self.nev_start) / self.ts_freq, 2),
-            'Comment': raw_df['Data']
-        })
-        self.full_comment_df = cleaned_df
+        try:
+            raw_df = get_all_nev_comments(self.streamed_files['NeV'])
+        except ValueError as e:
+            self.error('No comments could be loaded from the NeV files!')
+            self.full_comment_df = self.init_comments()
+        else:
+            first_nev = NevFile(self.streamed_files['NeV'][0])
+            self.nev_start = get_nev_rec_start(first_nev)
+            self.ts_freq = first_nev.basic_header['TimeStampResolution']
+            cleaned_df = pd.DataFrame.from_dict({
+                'Timestamp': raw_df['TimeStamps'],
+                'Time Elapsed': np.round((raw_df['TimeStamps'] - self.nev_start) / self.ts_freq, 2),
+                'Comment': raw_df['Data']
+            })
+            self.full_comment_df = cleaned_df
+            self.notify('Finished loading comments. ')
         self.reset_comments()
-        self.notify(f'Finished loading comments. \n Ready for time selection...\n\n')
+        self.notify(f'Ready for time selection...\n')
 
     def build_bot_row(self):
         bot_row = tk.Frame(master=self.root, padx=10, pady=10)
@@ -320,6 +330,7 @@ class StitcherGUI(object):
 
         # Add formatting to the console
         self.console.tag_configure('error', foreground='red')
+        self.console.tag_configure('warning', foreground='orange')
 
         # Add the master action buttons
         button_width = 15
@@ -349,12 +360,15 @@ class StitcherGUI(object):
 
     def write_to_console(self, message, tags=(), pad_newline=True):
         """Universal function for adding text to the log console"""
-        if pad_newline:
-            message = f'{message}\n'
-        self.console['state'] = 'normal'
-        self.console.insert('end', message, tags)
-        self.console['state'] = 'disabled'
-        self.console.see('end')
+        if self.console:
+            if pad_newline:
+                message = f'{message}\n'
+            self.console['state'] = 'normal'
+            self.console.insert('end', message, tags)
+            self.console['state'] = 'disabled'
+            self.console.see('end')
+        else:
+            print(message)
 
     def notify(self, message):
         """Write a generic non-tagged message to the console"""
@@ -367,12 +381,15 @@ class StitcherGUI(object):
             self.write_to_console(line, tags=('error',), pad_newline=False)
         self.notify('Process aborted')
 
+    def show_warning(self, message, category, filename, lineno, file=None, line=None):
+        self.write_to_console(message, tags=('warning',))
+
     def error(self, message):
         """Display a short error message in the console"""
         self.write_to_console(message, tags=('error',))
 
     def get_out_filepath(self, filetype):
-        filename = f'{self.file_name}.{filetype}'
+        filename = f'{self.file_name.get()}.{filetype}'
         path = os.path.join(self.output_dir.get(), filename)
         return path
 
@@ -383,7 +400,8 @@ class StitcherGUI(object):
         """
         # Overall initialization
         self.notify(f'Starting stitching process')
-        start, end = self.start_time.get(), self.end_time.get()
+        start = round(self.start_time.get() + (self.nev_start / self.ts_freq), 6)
+        end = round(self.end_time.get() + (self.nev_start / self.ts_freq), 6)
         try:
             os.makedirs(self.output_dir.get(), exist_ok=True)
         except FileNotFoundError:
@@ -400,17 +418,19 @@ class StitcherGUI(object):
 
         # Stitch each of the NsX filetypes
         self.notify('Beginning NsX stitching...')
-        nsx_files = {filetype: files for filetype, files in self.streamed_files if 'ns' in filetype}
-        for filetype, files in nsx_files:
+        nsx_files = {filetype: files for filetype, files in self.streamed_files.items() if 'ns' in filetype.lower()}
+        for filetype, files in nsx_files.items():
             self.notify(f'Stitching {len(files)} {filetype} files')
             in_range = find_nsx_in_range(files, start, end)
             self.notify(f'Found {len(in_range)} files in the selected time range')
             if in_range:
+                nsx_start = datetime.now()
                 nsx_stitch = StitchedNsXFile(in_range, start, end)
                 # TODO: should we show a progressbar here?
                 with open(self.get_out_filepath(filetype.lower()), 'wb') as nsx_out:
                     nsx_stitch.write(nsx_out)
-                self.notify('Finished stitching NsX files')
+                elapsed = (datetime.now() - nsx_start)
+                self.notify(f'Finished stitching {filetype} files ({elapsed}ms)')
             else:
                 self.error('Could not find enough files to stitch!')
                 continue
