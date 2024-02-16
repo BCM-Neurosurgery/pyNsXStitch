@@ -129,13 +129,15 @@ def get_time_in_file(nsx_file, timestamp):
     return time_in_file
 
 
-def get_all_nev_comments(nev_filenames):
+def get_all_nev_comments(nev_filenames, gui_updater=None):
     """Get a data frame of all the comments in the listed NeV files"""
     nev_files = [NevFile(fp) for fp in nev_filenames]
 
     # Read in all the comments from all the files
     all_easy_read = []
     for i, nev_file in enumerate(nev_files):
+        if gui_updater is not None:
+            gui_updater(100 * i/len(nev_files))
         try:
             nev_data = nev_file.getdata()
         except (ValueError, IndexError):
