@@ -14,75 +14,84 @@ from pyNsXStitch.helpers import get_all_nev_comments, get_all_streamed_files, ge
 
 
 def run_stitch_async(gui):
-    # Overall initialization
-    gui.notify(f'Starting stitching process')
-    start = round(gui.start_time.get() + (gui.nev_start / gui.ts_freq), 6)
-    end = round(gui.end_time.get() + (gui.nev_start / gui.ts_freq), 6)
     try:
-        os.makedirs(gui.output_dir.get(), exist_ok=True)
-    except FileNotFoundError:
-        gui.error('Could not find the selected output directory!\n'
-                  '  Are you sure it has been selected correctly?\n')
-        return
-    
-    # Stitch the NeV files first
-    gui.notify('Stitching NeV files...')
-    gui.update_progressbar(0)
-    nev_stitch = StitchedNeVFile(gui.streamed_files['NeV'], start, end)
-    with open(gui.get_out_filepath('nev'), 'wb') as nev_out:
-        nev_stitch.write(nev_out, gui_updater=gui.update_progressbar)
-    gui.update_progressbar(100)
-    gui.notify('Stitched NeV file complete')
+        # Overall initialization
+        gui.notify(f'Starting stitching process')
+        start = round(gui.start_time.get() + (gui.nev_start / gui.ts_freq), 6)
+        end = round(gui.end_time.get() + (gui.nev_start / gui.ts_freq), 6)
+        try:
+            os.makedirs(gui.output_dir.get(), exist_ok=True)
+        except FileNotFoundError:
+            gui.error('Could not find the selected output directory!\n'
+                      '  Are you sure it has been selected correctly?\n')
+            return
 
-    # Stitch each of the NsX filetypes
-    gui.notify('Beginning NsX stitching...')
-    nsx_files = {filetype: files for filetype, files in gui.streamed_files.items() if 'ns' in filetype.lower()}
-    for filetype, files in nsx_files.items():
+        # Stitch the NeV files first
+        gui.notify('Stitching NeV files...')
         gui.update_progressbar(0)
-        gui.notify(f'Stitching from {len(files)} {filetype} files')
-        in_range = find_nsx_in_range(files, start, end)
-        gui.notify(f'Found {len(in_range)} files in the selected time range')
-        if in_range:
-            nsx_start = datetime.now()
-            nsx_stitch = StitchedNsXFile(in_range, start, end)
-            # TODO: should we show a progressbar here?
-            with open(gui.get_out_filepath(filetype.lower()), 'wb') as nsx_out:
-                nsx_stitch.write(nsx_out, gui_updater=gui.update_progressbar)
-            elapsed = (datetime.now() - nsx_start)
-            gui.notify(f'Finished stitching {filetype} files ({round(elapsed.total_seconds(), 4)} s)')
-        else:
-            gui.error('Could not find enough files to stitch!')
-            continue
-    gui.notify('Stitching complete. \n')
+        nev_stitch = StitchedNeVFile(gui.streamed_files['NeV'], start, end)
+        with open(gui.get_out_filepath('nev'), 'wb') as nev_out:
+            nev_stitch.write(nev_out, gui_updater=gui.update_progressbar)
+        gui.update_progressbar(100)
+        gui.notify('Stitched NeV file complete')
+
+        # Stitch each of the NsX filetypes
+        gui.notify('Beginning NsX stitching...')
+        nsx_files = {filetype: files for filetype, files in gui.streamed_files.items() if 'ns' in filetype.lower()}
+        for filetype, files in nsx_files.items():
+            gui.update_progressbar(0)
+            gui.notify(f'Stitching from {len(files)} {filetype} files')
+            in_range = find_nsx_in_range(files, start, end)
+            gui.notify(f'Found {len(in_range)} files in the selected time range')
+            if in_range:
+                nsx_start = datetime.now()
+                nsx_stitch = StitchedNsXFile(in_range, start, end)
+                with open(gui.get_out_filepath(filetype.lower()), 'wb') as nsx_out:
+                    nsx_stitch.write(nsx_out, gui_updater=gui.update_progressbar)
+                elapsed = (datetime.now() - nsx_start)
+                gui.notify(f'Finished stitching {filetype} files ({round(elapsed.total_seconds(), 4)} s)')
+            else:
+                gui.error('Could not find enough files to stitch!')
+                continue
+        gui.notify('Stitching complete. \n')
+    except Exception as e:
+        gui.disp_error(*sys.exc_info())
+    finally:
+        gui.update_progressbar(-1)
     
     
 def load_dir_async(gui):
     """Do the work of loading the NeV files. Can be run asyncronously"""
-    gui.update_progressbar(0)
-    gui.notify(f'Loading data in: {gui.source_dir.get()}')
-    gui.streamed_files = get_all_streamed_files(gui.source_dir.get(), full_paths=True)
-    gui.notify(f'Found {len(gui.streamed_files["NeV"])} NeV files')
-    gui.notify(f'Loading comments from NeV...')
     try:
-        raw_df = get_all_nev_comments(gui.streamed_files['NeV'], gui_updater=gui.update_progressbar)
-    except ValueError as e:
-        gui.error('No comments could be loaded from the NeV files!')
-        gui.full_comment_df = gui.init_comments()
-    else:
-        first_nev = NevFile(gui.streamed_files['NeV'][0])
-        gui.nev_start = get_nev_rec_start(first_nev)
-        gui.ts_freq = first_nev.basic_header['TimeStampResolution']
-        cleaned_df = pd.DataFrame.from_dict({
-            'Timestamp': raw_df['TimeStamps'],
-            'Time Elapsed': np.round((raw_df['TimeStamps'] - gui.nev_start) / gui.ts_freq, 2),
-            'Comment': raw_df['Data']
-        })
-        gui.update_progressbar(100)
-        gui.full_comment_df = cleaned_df
-        gui.notify('Finished loading comments. ')
-    gui.reset_comments()
-    gui.notify(f'Ready for time selection...\n')
-    gui.update_progressbar(-1)
+        gui.update_progressbar(0)
+        gui.notify(f'Loading data in: {gui.source_dir.get()}')
+        gui.streamed_files = get_all_streamed_files(gui.source_dir.get(), full_paths=True)
+        gui.notify(f'Found {len(gui.streamed_files["NeV"])} NeV files')
+        gui.notify(f'Loading comments from NeV...')
+        try:
+            raw_df = get_all_nev_comments(gui.streamed_files['NeV'], gui_updater=gui.update_progressbar)
+        except ValueError as e:
+            gui.error('No comments could be loaded from the NeV files!')
+            gui.full_comment_df = gui.init_comments()
+        else:
+            first_nev = NevFile(gui.streamed_files['NeV'][0])
+            gui.nev_start = get_nev_rec_start(first_nev)
+            gui.ts_freq = first_nev.basic_header['TimeStampResolution']
+            cleaned_df = pd.DataFrame.from_dict({
+                'Timestamp': raw_df['TimeStamps'],
+                'Time Elapsed': np.round((raw_df['TimeStamps'] - gui.nev_start) / gui.ts_freq, 2),
+                'Comment': raw_df['Data']
+            })
+            gui.update_progressbar(100)
+            gui.full_comment_df = cleaned_df
+            gui.notify('Finished loading comments. ')
+        gui.reset_comments()
+        gui.notify(f'Ready for time selection...\n')
+        gui.update_progressbar(-1)
+    except Exception as e:
+        gui.disp_error(*sys.exc_info())
+    finally:
+        gui.update_progressbar(-1)
 
 
 class StitcherGUI(object):
