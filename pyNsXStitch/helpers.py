@@ -103,7 +103,7 @@ def find_nsx_in_range(nsx_filepaths, start, end, subtract_offset=False):
         file_end = get_nsx_end_time(nsx_fp)
         if file_start <= start < file_end:
             in_range = True
-        elif file_start < end <= file_end:
+        elif end <= file_end:
             # We've found the end of the range, we can quit looping (but still include this file)
             files.append(nsx_fp)
             break
