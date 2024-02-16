@@ -58,7 +58,10 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_e
     """
 
     # Initializations
-    elec_id_indices = check_elecid(elec_ids)
+    elec_names = check_elecid(elec_ids)
+    all_elecs = [elec_info['ElectrodeID'] for elec_info in nsx_file.extended_headers]
+    elec_id_indices = None  # TODO: implement better electrode selection
+
     ts_freq = nsx_file.basic_header['TimeStampResolution']
     n_channels = nsx_file.basic_header["ChannelCount"]
     data_point_size = n_channels * DATA_BYTE_SIZE
