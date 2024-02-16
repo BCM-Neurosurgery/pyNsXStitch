@@ -28,6 +28,7 @@ class StitcherGUI(object):
         self.end_time = tk.DoubleVar(master=self.root, value=None)
         self.start_timestamp = tk.IntVar(master=self.root, value=None)
         self.end_timestamp = tk.IntVar(master=self.root, value=None)
+        self.progress_amt = tk.IntVar(master=self.root, value=0)
 
         # Additional important values to keep track of
         self.full_comment_df = self.init_comments()
@@ -42,6 +43,9 @@ class StitcherGUI(object):
         self.table_elements = []
         self.table_area = None
         self.console = None
+        self.progressbar = None
+        self.progress_fill = None
+        self.progress_bg = None
 
         self.build_gui()
 
@@ -320,13 +324,30 @@ class StitcherGUI(object):
         self.reset_comments()
         self.notify(f'Ready for time selection...\n')
 
+    def update_progressbar(self):
+        """Update the progressbar fill to based on the current task progress"""
+        full_width = 800
+        if self.progress_amt.get() < 0:  # Switch to passive not running anything mode
+            self.progressbar.itemconfigure(self.progress_bg, fill='')
+            fill_pixels = 0
+        else:  # Switch to active running a task mode (fully visible progressbar)
+            self.progressbar.itemconfigure(self.progress_bg, fill='White')
+            fill_pixels = round(full_width * self.progress_amt.get() / 100)
+        self.progressbar.coords(self.progress_fill, (0, 0, fill_pixels, 5))
+
     def build_bot_row(self):
         bot_row = tk.Frame(master=self.root, padx=10, pady=10)
 
         # Build the console window
         console_frame = tk.Frame(master=bot_row, width=110, height=10, padx=5)
         self.console = tk .Text(master=console_frame, width=100, height=12,  state='disabled')
-        self.console.pack(side=tk.LEFT)
+        self.console.pack(side=tk.TOP, anchor=tk.NW)
+        self.progressbar = tk.Canvas(master=console_frame, width=800, height=5)
+        self.progress_bg = self.progressbar.create_rectangle(0, 0, 800, 5, fill='', outline='')
+        self.progress_fill = self.progressbar.create_rectangle(
+            0, 0, 0, 5, fill='SteelBlue1', outline=''
+        )
+        self.progressbar.pack(side=tk.TOP, anchor=tk.NW)
         console_frame.pack(side=tk.LEFT)
 
         # Add formatting to the console
