@@ -6,6 +6,7 @@ from tkinter import filedialog
 from datetime import datetime
 import numpy as np
 import pandas as pd
+from progressbar import progressbar
 from brpylib import NevFile
 from pyNsXStitch.stitchers import StitchedNsXFile, StitchedNeVFile
 from pyNsXStitch.helpers import get_all_nev_comments, get_all_streamed_files, get_nev_rec_start, find_nsx_in_range
@@ -324,13 +325,13 @@ class StitcherGUI(object):
 
         # Build the console window
         console_frame = tk.Frame(master=bot_row, width=110, height=10, padx=5)
-        self.console = tk.Text(master=console_frame, width=100, height=12,  state='disabled')
+        self.console = tk .Text(master=console_frame, width=100, height=12,  state='disabled')
         self.console.pack(side=tk.LEFT)
         console_frame.pack(side=tk.LEFT)
 
         # Add formatting to the console
         self.console.tag_configure('error', foreground='red')
-        self.console.tag_configure('warning', foreground='orange')
+        self.console.tag_configure('warning', foreground='DarkOrange3')
 
         # Add the master action buttons
         button_width = 15
@@ -420,7 +421,7 @@ class StitcherGUI(object):
         self.notify('Beginning NsX stitching...')
         nsx_files = {filetype: files for filetype, files in self.streamed_files.items() if 'ns' in filetype.lower()}
         for filetype, files in nsx_files.items():
-            self.notify(f'Stitching {len(files)} {filetype} files')
+            self.notify(f'Stitching from {len(files)} {filetype} files')
             in_range = find_nsx_in_range(files, start, end)
             self.notify(f'Found {len(in_range)} files in the selected time range')
             if in_range:
@@ -430,7 +431,7 @@ class StitcherGUI(object):
                 with open(self.get_out_filepath(filetype.lower()), 'wb') as nsx_out:
                     nsx_stitch.write(nsx_out)
                 elapsed = (datetime.now() - nsx_start)
-                self.notify(f'Finished stitching {filetype} files ({elapsed}ms)')
+                self.notify(f'Finished stitching {filetype} files ({round(elapsed.total_seconds(), 4)} s)')
             else:
                 self.error('Could not find enough files to stitch!')
                 continue
