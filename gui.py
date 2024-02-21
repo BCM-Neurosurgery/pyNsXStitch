@@ -7,8 +7,8 @@ from tkinter import filedialog
 from datetime import datetime
 import numpy as np
 import pandas as pd
-from progressbar import progressbar
 from brpylib import NevFile
+import xml.etree.ElementTree as xml
 from pyNsXStitch.stitchers import StitchedNsXFile, StitchedNeVFile
 from pyNsXStitch.helpers import get_all_nev_comments, get_all_streamed_files, get_nev_rec_start, find_nsx_in_range
 
@@ -66,6 +66,7 @@ def load_dir_async(gui):
         gui.update_progressbar(0)
         gui.notify(f'Loading data in: {gui.source_dir.get()}')
         gui.streamed_files = get_all_streamed_files(gui.source_dir.get(), full_paths=True)
+        gui.update_patient_id()
         gui.notify(f'Found {len(gui.streamed_files["NeV"])} NeV files')
         gui.notify(f'Loading comments from NeV...')
         try:
@@ -110,6 +111,7 @@ class StitcherGUI(object):
         self.end_time = tk.DoubleVar(master=self.root, value=None)
         self.start_timestamp = tk.IntVar(master=self.root, value=None)
         self.end_timestamp = tk.IntVar(master=self.root, value=None)
+        self.patient_id = tk.StringVar(master=self.root, value=None)
 
         # Additional important values to keep track of
         self.full_comment_df = self.init_comments()
@@ -147,7 +149,8 @@ class StitcherGUI(object):
         warnings.showwarning = self.show_warning
         return root
 
-    def init_comments(self):
+    @staticmethod
+    def init_comments():
         """Initialize an empty comment dataframe with just headers"""
         return pd.DataFrame.from_dict({
             'Timestamp': [], 'TimeElapsed': [], 'Comment': []
@@ -204,10 +207,38 @@ class StitcherGUI(object):
 
         time_select = self.build_time_select(middle_row)
         time_select.pack(side=tk.LEFT, anchor=tk.N,)
-        # info_column = self.build_info_column(middle_row)
-        # info_column.pack(side=tk.LEFT, anchor=tk.N)
-
+        info_column = self.build_info_column(middle_row)
+        info_column.pack(side=tk.LEFT, anchor=tk.N)
         return middle_row
+
+    def update_patient_id(self):
+        patient_id = '--'
+        if self.source_dir.get():
+            sif_files = [f for f in os.listdir(self.source_dir.get()) if f.endswith('.sif')]
+            sif_data = xml.parse(os.path.join(self.source_dir.get(), sif_files[0]))
+            patient = sif_data.getroot().findall('Patient/Id')[0].text
+            if patient is None:
+                patient_id = 'Unavailable'
+            else:
+                patient_id = patient
+        self.patient_id.set(f'Patient ID: {patient_id}')
+
+    def build_info_column(self, parent):
+        info_column = tk.Frame(master=parent, height=300, width=50, highlightcolor='black')
+
+        # Show the quick summary instructions
+        instruction_path = os.path.join(os.path.dirname(__file__), 'GUI_quick_instructions.txt')
+        with open(instruction_path, 'r') as f:
+            instructions = f.read()
+        how_to_label = tk.Label(info_column, text=instructions, justify=tk.LEFT)
+        how_to_label.pack(side=tk.TOP, anchor=tk.W)
+
+        # Show data about the selected patient
+        tk.Label(info_column, textvariable=self.patient_id, justify=tk.LEFT).pack(side=tk.TOP, anchor=tk.W)
+        self.update_patient_id()
+        pass
+
+        return info_column
 
     def build_time_select(self, parent):
         """Build the section of the GUI that helps with selecting the time limits of the NsX Stitching"""
