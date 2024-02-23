@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys, traceback
 import warnings
 import threading
@@ -9,18 +10,22 @@ import numpy as np
 import pandas as pd
 from brpylib import NevFile
 import xml.etree.ElementTree as xml
+from pyNsXStitch.streamers import simple_copy_files
 from pyNsXStitch.stitchers import StitchedNsXFile, StitchedNeVFile
-from pyNsXStitch.helpers import get_all_nev_comments, get_all_streamed_files, get_nev_rec_start, find_nsx_in_range
+from pyNsXStitch.helpers import get_all_nev_comments, get_all_streamed_files, get_nev_rec_start, \
+    find_nsx_in_range, get_support_files
 
 
 def run_stitch_async(gui):
     try:
-        # Overall initialization
+        # Overall initialization. Get values from all variables ASAP before they're likely to be changed
         gui.notify(f'Starting stitching process')
+        source_dir = gui.source_dir.get()
+        output_dir = gui.output_dir.get()
         start = round(gui.start_time.get() + (gui.nev_start / gui.ts_freq), 6)
         end = round(gui.end_time.get() + (gui.nev_start / gui.ts_freq), 6)
         try:
-            os.makedirs(gui.output_dir.get(), exist_ok=True)
+            os.makedirs(output_dir, exist_ok=True)
         except FileNotFoundError:
             gui.error('Could not find the selected output directory!\n'
                       '  Are you sure it has been selected correctly?\n')
@@ -53,6 +58,20 @@ def run_stitch_async(gui):
             else:
                 gui.error('Could not find enough files to stitch!')
                 continue
+
+        # Copy over all the metadata files
+        gui.notify('Copying metadata and helper files...')
+        gui.update_progressbar(0)
+        non_streamed_files = get_support_files(source_dir)
+        n_files = len(non_streamed_files)
+        for i, filename in enumerate(non_streamed_files):
+            new_name = gui.get_out_filepath(filename.split('.')[-1])
+            shutil.copy(
+                os.path.join(source_dir, filename),
+                os.path.join(output_dir, new_name)
+            )
+            gui.update_progressbar(100 * (i+1)/n_files)
+
         gui.notify('Stitching complete. \n')
     except Exception as e:
         gui.disp_error(*sys.exc_info())
