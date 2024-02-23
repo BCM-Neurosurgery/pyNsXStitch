@@ -138,6 +138,7 @@ class StitcherGUI(object):
         self.streamed_files = None
         self.ts_freq = None
         self.nev_start = None
+        self.custom_name = None
 
         # Additional GUI elements
         self.time_frame = None
@@ -283,12 +284,49 @@ class StitcherGUI(object):
 
         tk.Label(master=inputs, text="Output Name").pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
         tk.Entry(master=inputs, textvariable=self.file_name).pack(side=tk.TOP)
+        buttons = tk.Frame(master=inputs)
+        tk.Button(master=buttons, text='Remember', command=self.set_name).pack(side=tk.RIGHT, anchor=tk.N)
+        tk.Button(master=buttons, text='Reset', command=self.reset_name).pack(side=tk.RIGHT, anchor=tk.N)
+        buttons.pack(side=tk.TOP, anchor=tk.E)
 
         inputs.pack(side=tk.LEFT, anchor=tk.N)
 
         self.reset_comments()
 
         return self.time_frame
+
+    def set_name(self):
+        self.custom_name = self.file_name.get()
+        self.notify('Saved a custom output file name')
+
+    def reset_name(self):
+        self.custom_name = None
+        self.file_name.set('stitched')
+        self.auto_set_name()
+        self.notify('Cleared custom name.')
+
+    def auto_set_name(self):
+        # Only auto update name if no explicit custom name has been set
+        if self.custom_name is not None:
+            return
+
+        found_name = None
+        for idx, row in self.full_comment_df.iterrows():
+            row_ts = row['Timestamp']
+            if row_ts > self.end_timestamp.get():
+                break  # We're out of the search interval. Finish searching
+            if row_ts < self.start_timestamp.get():
+                continue  # We're before the search interval, move to next comment
+            if row['Comment'].startswith('$TASKID'):
+                # We found a filename comment. Parse it and finish searching
+                found_name = row['Comment'].split(' ')[1]
+                break
+
+        if found_name is None:
+            self.warn('No valid TASKID comment found in the time range')
+        else:
+            self.notify('Found a TASKID comment, using it as the output name')
+            self.file_name.set(found_name)
 
     def get_row_color(self, row_idx, row_ts):
         row_color = ['gray85', 'gray90'][row_idx % 2]
@@ -384,6 +422,8 @@ class StitcherGUI(object):
         time_lims = (ts_lims - self.nev_start) / self.ts_freq
         self.start_time.set(np.round(time_lims[0], 4))
         self.end_time.set(np.round(time_lims[1], 4))
+
+        self.auto_set_name()
         self.recolor_table()
 
     def update_tlims(self):
@@ -394,6 +434,7 @@ class StitcherGUI(object):
         self.end_timestamp.set(np.ceil(approx_ts_lims[1]))
 
         self.recolor_table()
+        self.auto_set_name()
 
     def reset_tlims(self):
         self.start_timestamp.set(0)
@@ -508,6 +549,10 @@ class StitcherGUI(object):
     def notify(self, message):
         """Write a generic non-tagged message to the console"""
         self.write_to_console(message)
+
+    def warn(self, message):
+        """Write a generic non-tagged message to the console"""
+        self.write_to_console(message, tags=('warning',))
 
     def disp_error(self, exec, val, tb):
         """Display a caught error with traceback in the console"""
