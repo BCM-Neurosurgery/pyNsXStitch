@@ -24,6 +24,7 @@ def get_all_streamed_files(directory, full_paths=False):
     This includes all NsX and NeV files. No other metadata files are included.
 
     :param directory:
+    :param full_paths:
     :return: dictionary of file names keyed by blackrock file type
     """
     files = {
@@ -42,6 +43,19 @@ def get_all_streamed_files(directory, full_paths=False):
                 files[file_type] = []
             files[file_type].append(file_path)
     return files
+
+
+def get_support_files(directory, full_paths=False):
+    """Get a list of all the support files in a directory"""
+    support_file_types = ['csr', 'ccf', 'sif', 'toc']
+    all_files = os.listdir(directory)
+    support_files = []
+    for file_path in all_files:
+        if file_path.split('.')[-1] in support_file_types:
+            support_files.append(file_path)
+    if full_paths:
+        support_files = [os.path.join(directory, f) for f in support_files]
+    return support_files
 
 
 def get_nsx_duration(nsx_filepath):
