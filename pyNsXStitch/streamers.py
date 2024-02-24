@@ -6,14 +6,6 @@ import numpy as np
 from brpylib.brpylib import ELEC_ID_DEF, check_elecid, DATA_BYTE_SIZE, DATA_PAGING_SIZE
 
 
-def simple_copy_files(files, source, target):
-    """Naive copy a list of files from a source directory to a target directory"""
-    for file in files:
-        source_path = os.path.join(source, file)
-        output_path = os.path.join(target, file)
-        shutil.copy(source_path, output_path)
-
-
 def stream_nev_packets(nev_file, start=0, end=None):
     """
     Iterator that sequentially yields all the packets saved in the NeV files
