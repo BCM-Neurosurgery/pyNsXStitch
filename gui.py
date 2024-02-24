@@ -310,11 +310,12 @@ class StitcherGUI(object):
         if self.custom_name is not None:
             return
 
-        found_name = None
+        found_name = 'stitched'
         for idx, row in self.full_comment_df.iterrows():
             row_ts = row['Timestamp']
             if row_ts > self.end_timestamp.get():
-                break  # We're out of the search interval. Finish searching
+                self.warn('No valid TASKID comment found in the time range')
+                break  # We're out of the search interval w/o finding a $TASKID. Finish searching
             if row_ts < self.start_timestamp.get():
                 continue  # We're before the search interval, move to next comment
             if row['Comment'].startswith('$TASKID'):
@@ -322,11 +323,8 @@ class StitcherGUI(object):
                 found_name = row['Comment'].split(' ')[1]
                 break
 
-        if found_name is None:
-            self.warn('No valid TASKID comment found in the time range')
-        else:
-            self.notify('Found a TASKID comment, using it as the output name')
-            self.file_name.set(found_name)
+        self.notify('Found a TASKID comment, using it as the output name')
+        self.file_name.set(found_name)
 
     def get_row_color(self, row_idx, row_ts):
         row_color = ['gray85', 'gray90'][row_idx % 2]
