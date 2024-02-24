@@ -3,6 +3,11 @@
 Small helper library to stitch together Blackrock NeV and NsX files from a chunked recording into task specific files 
 based on comments
 
+**** WARNING: THIS CODE REMAINS AS YET UNVERIFIED AND MAKES NO GUARANTEE THAT THE OUTPUT NSX FILES WILL CONTAIN
+INDIVIDUAL MISSED PACKETS OR DATA POINTS***
+
+(though it does generally work well as far as I can tell...)
+
 ## Installation
 
 ### Stand-alone
