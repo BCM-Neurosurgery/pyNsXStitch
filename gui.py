@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 from brpylib import NevFile
 import xml.etree.ElementTree as xml
-from pyNsXStitch.streamers import simple_copy_files
 from pyNsXStitch.stitchers import StitchedNsXFile, StitchedNeVFile
 from pyNsXStitch.helpers import get_all_nev_comments, get_all_streamed_files, get_nev_rec_start, \
     find_nsx_in_range, get_support_files
