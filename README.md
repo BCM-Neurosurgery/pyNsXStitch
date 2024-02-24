@@ -21,7 +21,9 @@ To install this as a python project you can use to perform custom stitching:
     ```bash
     pip install -r requirements.txt
     ```
-  - Check out the usage section below for usage instructions
+  - Check out the usage section below for usage instructions. If you plan to run the included jupyter notebooks, you 
+will need to make sure `jupyter` is installed. You can either do this yourself, or uncomment the jupyter line in the 
+requirements file before running the pip command above.
 
 
 ### Dependency
