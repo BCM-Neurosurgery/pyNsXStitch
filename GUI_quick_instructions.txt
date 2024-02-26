@@ -1,0 +1,7 @@
+Instructions:
+  1. Select Source Directory
+  2. Select Output Directory
+  3. Load all comments
+  4. Select a start and end time
+  5. Check the output name
+  6. Press 'Stitch'

@@ -15,10 +15,10 @@ class StitchedNeVFile(object):
     create_file_loc = 8 + 2*2 + 4*4 + 16
     basic_header_size = create_file_loc + 32 + 256 + 4
 
-    def __init__(self, files_to_stitch):
+    def __init__(self, files_to_stitch, start=None, end=None):
         self.files = files_to_stitch
-        self.start_time = None
-        self.end_time = None
+        self.start_time = start
+        self.end_time = end
         self.skip_packet_ids = None
 
     def get_max_packet_size(self):
@@ -26,13 +26,16 @@ class StitchedNeVFile(object):
         print(packet_sizes)
         return max(packet_sizes)
 
-    def iter_data(self):
+    def iter_data(self, gui_updater=None):
         """Iterate through all the data packets in a file"""
         max_packet = self.get_max_packet_size()
         for file_i, filename in enumerate(self.files):
             nev_file = NevFile(filename)
+            duration = self.end_time - self.start_time
             for meta, packet_data in stream_nev_packets(nev_file, start=self.start_time, end=self.end_time):
-
+                if gui_updater is not None:
+                    elapsed = meta[0] - self.start_time
+                    gui_updater(100 * elapsed / duration)
                 packet_id = meta[1]
                 if self.skip_packet_ids is not None and packet_id in self.skip_packet_ids:
                     # Detect and skip some packets if we were asked to skip packets of this type
@@ -62,12 +65,12 @@ class StitchedNeVFile(object):
         # Set the file pointer to the end of the header, so we are ready to write packets
         out_file.seek(origin.basic_header['BytesInHeader'], 0)
 
-    def write_data(self, out_file):
+    def write(self, out_file, gui_updater=None):
 
         self.write_headers(out_file)
 
         # Write all the data packets in order
-        for meta, packet in self.iter_data():
+        for meta, packet in self.iter_data(gui_updater=gui_updater):
             out_file.write(pack('<Q', meta[0]))
             out_file.write(pack('<H', meta[1]))
 
@@ -83,12 +86,13 @@ class StitchedNsXFile(object):
         self.end_time = end
         self.elec_ids = elec_ids
 
-    def iter_data(self):
+    def iter_data(self, gui_updater=None):
         """
         Iterator that will loop over all the data packets in all the NsX files
 
         See helpers.stream_nsx_data for details about how the data is streamed out from each individual file
         """
+        duration = self.end_time - self.start_time
         for file_i, filename in enumerate(self.files):
             nsx_file = NsxFile(filename)
             streamer = stream_nsx_data(
@@ -98,6 +102,9 @@ class StitchedNsXFile(object):
                 elec_ids=self.parse_elec_ids()
             )
             for meta, data_block in streamer:
+                if gui_updater is not None and meta is not None:
+                    elapsed = meta[0] - self.start_time
+                    gui_updater(100 * elapsed / duration)
                 yield meta, data_block
 
     def parse_elec_ids(self):
@@ -149,13 +156,13 @@ class StitchedNsXFile(object):
             else:
                 origin.datafile.seek(62, 1)
 
-    def write_data(self, out_file):
+    def write(self, out_file, gui_updater=None):
 
         self.write_headers(out_file)
 
         prev_loop_t = datetime.now()
         durations = []
-        for meta, data_block in self.iter_data():
+        for meta, data_block in self.iter_data(gui_updater=gui_updater):
 
             # Data blocks at the start of a packet have timestamps. Write them back at start
             if meta is not None:
