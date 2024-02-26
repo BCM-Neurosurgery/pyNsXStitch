@@ -87,11 +87,12 @@ def get_nsx_end_time(nsx_filepath):
         last_ts = timestamp
         packet_size = packet_points
 
-    end_ts = last_ts + packet_size
-    sample_freq = nsx_file.basic_header['SampleResolution']
+    sample_freq = int(nsx_file.basic_header['SampleResolution'] / nsx_file.basic_header['Period'])
+    ts_freq = nsx_file.basic_header['TimeStampResolution']
+    end_ts = last_ts + int(packet_size * ts_freq / sample_freq)
 
     del nsx_file
-    return end_ts / sample_freq
+    return end_ts / ts_freq
 
 
 def get_nsx_start_time(nsx_filepath):
