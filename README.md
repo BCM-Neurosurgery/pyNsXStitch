@@ -15,7 +15,7 @@ To install this as a python project you can use to perform custom stitching:
   - Make sure you have a python environment (conda recommended) install with python 3.10 or greater
   - Clone the repository
     ```bash
-    git clone git@github.com:shethlab/pyNsXStitch.git
+    git clone git@github.com:BCM-Neurosurgery/pyNsXStitch.git
     ```
   - Then install all the requirements with
     ```bash
@@ -29,7 +29,7 @@ requirements file before running the pip command above.
 ### Dependency
 To install this code as a dependency to your own project, add the following line to your requirements.txt:
 ```requirements
-git+ssh://git@github.com/shethlab/pyNsXStitch.git@main#egg=pynsxstitch
+pyNsXStitch @ git+ssh://git@github.com/BCM-Neurosurgery/pyNsXStitch.git@main
 ```
 This will automatically solve the dependencies of this project and install it as a python package when you run
 ```bash
