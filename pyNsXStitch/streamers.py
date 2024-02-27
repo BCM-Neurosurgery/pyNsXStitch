@@ -41,7 +41,7 @@ def stream_nev_packets(nev_file, start=0, end=None):
             yield (timestamp, packet_id), raw_data
 
 
-def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_end_time=None):
+def stream_nsx_data(nsx_file, read_start_time=None, read_end_time=None):
     """
     This function is used to save a subset of data based on electrode IDs, file sizing, or file data time.  If
     both file_time_s and file_size are passed, it will default to file_time_s and determine sizing accordingly.
@@ -58,10 +58,6 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_e
     """
 
     # Initializations
-    elec_names = check_elecid(elec_ids)
-    all_elecs = [elec_info['ElectrodeID'] for elec_info in nsx_file.extended_headers]
-    elec_id_indices = None  # TODO: implement better electrode selection
-
     ts_freq = nsx_file.basic_header['TimeStampResolution']
     n_channels = nsx_file.basic_header["ChannelCount"]
     data_point_size = n_channels * DATA_BYTE_SIZE
@@ -125,8 +121,6 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_e
                 offset=location,
                 shape=shape,
             )
-            if elec_id_indices:
-                memory_map = memory_map[:, elec_id_indices]
 
             yield meta, memory_map
 

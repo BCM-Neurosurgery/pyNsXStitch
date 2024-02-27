@@ -83,12 +83,11 @@ class StitchedNeVFile(object):
 
 class StitchedNsXFile(object):
 
-    def __init__(self, files_to_stitch, start=None, end=None, elec_ids=ELEC_ID_DEF):
+    def __init__(self, files_to_stitch, start=None, end=None):
 
         self.files = files_to_stitch
         self.start_time = start
         self.end_time = end
-        self.elec_ids = elec_ids
 
     def iter_data(self, gui_updater=None):
         """
@@ -104,8 +103,7 @@ class StitchedNsXFile(object):
             streamer = stream_nsx_data(
                 nsx_file,
                 read_start_time=self.start_time,
-                read_end_time=self.end_time,
-                elec_ids=self.parse_elec_ids()
+                read_end_time=self.end_time
             )
             for meta, data_block in streamer:
                 if gui_updater is not None and meta is not None and duration is not None:
@@ -114,23 +112,6 @@ class StitchedNsXFile(object):
                 if meta is not None:
                     pass
                 yield meta, data_block
-
-    def parse_elec_ids(self):
-        # Run electrode id checks and set num_elecs
-        elec_ids = check_elecid(self.elec_ids)
-
-        origin = NsxFile(self.files[0])
-        all_elec_ids = [x["ElectrodeID"] for x in origin.extended_headers]
-        del origin
-
-        if elec_ids == ELEC_ID_DEF:
-            elec_ids = all_elec_ids
-        else:
-            elec_ids = check_dataelecid(elec_ids, all_elec_ids)
-            if not elec_ids:
-                elec_ids = None
-
-        return elec_ids
 
     def write_headers(self, out_file):
 
@@ -141,28 +122,9 @@ class StitchedNsXFile(object):
         # Make sure we're writing to hte very start of the new file
         out_file.seek(0, 0)
 
-        elec_ids = self.parse_elec_ids()
-        num_elecs = len(elec_ids)
-
-        bytes_in_headers = NSX_BASIC_HEADER_BYTES_22 + NSX_EXT_HEADER_BYTES_22 * num_elecs
-
         # Copy over the headers
-        out_file.write(origin.datafile.read(10))
-        out_file.write(np.array(bytes_in_headers).astype(np.uint32).tobytes())
-        origin.datafile.seek(4, 1)
-        out_file.write(origin.datafile.read(296))
-        out_file.write(np.array(num_elecs).astype(np.uint32).tobytes())
-        origin.datafile.seek(4, 1)
-
-        for i in range(len(origin.extended_headers)):
-            h_type = origin.datafile.read(2)
-            chan_id = origin.datafile.read(2)
-            if unpack("<H", chan_id)[0] in elec_ids:
-                out_file.write(h_type)
-                out_file.write(chan_id)
-                out_file.write(origin.datafile.read(62))
-            else:
-                origin.datafile.seek(62, 1)
+        bytes_in_headers = origin.basic_header['BytesInHeader']
+        out_file.write(origin.datafile.read(bytes_in_headers))
 
     def write(self, out_file, gui_updater=None):
 
