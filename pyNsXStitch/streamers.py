@@ -71,11 +71,12 @@ def stream_nsx_data(nsx_file, read_start_time=None, read_end_time=None):
     # For all file types, loop through all data packets, extracting data based on page sizing
     file_size = os.path.getsize(nsx_file.datafile.name)
     while nsx_file.datafile.tell() < file_size:
-
+        print(f'Packet at {nsx_file.datafile.tell() } out of {file_size}')
         # Get the time and length of this data packet
         nsx_file.datafile.seek(1, 1)
         timestamp = unpack("<Q", nsx_file.datafile.read(8))[0]
         packet_pts = unpack("<I", nsx_file.datafile.read(4))[0]
+        packet_start = nsx_file.datafile.tell()
         if packet_pts == 0:
             continue  # This packet is empty
         meta = (timestamp, packet_pts)
@@ -96,17 +97,24 @@ def stream_nsx_data(nsx_file, read_start_time=None, read_end_time=None):
 
         # Determine the altered end of the read in this packet if the end timestamp is in this packet
         end_ts = min(read_end_ts, packet_end_ts) if read_end_ts else packet_end_ts
-        read_end = abs(end_ts - timestamp) * data_point_size
+        read_end = packet_start + abs(end_ts - timestamp) * data_point_size
 
+        # Determine the number of sections that will be needed to read all the data in this packet
         read_size = read_end - read_start
         num_loops = int(ceil(read_size / section_size))
 
         # Extract the data in the packet section by section to avoid memory constraints
         for loop in range(num_loops):
             location = nsx_file.datafile.tell()
+            # print(f'Streaming data at {location}')
 
             # This is the last section we will be reading in this packet. Adjust the size appropriately
-            if location + section_size > read_end:
+            if location == read_end:
+                print(f'Hit the end of the packet with {num_loops-loop-1} out of {num_loops} section loops left')
+                break
+            elif location > read_end:
+                raise IndexError("We've read past the end of the packet in an NsX file!?")
+            elif location + section_size > read_end:
                 this_section_size = read_end - location
             else:
                 # Otherwise read the full section
@@ -128,4 +136,4 @@ def stream_nsx_data(nsx_file, read_start_time=None, read_end_time=None):
             meta = None  # We only return the packet metadata with the first section of the packet
 
             # Move the file pointer explicitly since np.memmap is unreliable
-            nsx_file.datafile.seek(location + section_size, 0)
+            nsx_file.datafile.seek(location + this_section_size, 0)
