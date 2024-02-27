@@ -41,7 +41,7 @@ def stream_nev_packets(nev_file, start=0, end=None):
             yield (timestamp, packet_id), raw_data
 
 
-def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_end_time=None):
+def stream_nsx_data(nsx_file, read_start_time=None, read_end_time=None):
     """
     This function is used to save a subset of data based on electrode IDs, file sizing, or file data time.  If
     both file_time_s and file_size are passed, it will default to file_time_s and determine sizing accordingly.
@@ -58,10 +58,6 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_e
     """
 
     # Initializations
-    elec_names = check_elecid(elec_ids)
-    all_elecs = [elec_info['ElectrodeID'] for elec_info in nsx_file.extended_headers]
-    elec_id_indices = None  # TODO: implement better electrode selection
-
     ts_freq = nsx_file.basic_header['TimeStampResolution']
     n_channels = nsx_file.basic_header["ChannelCount"]
     data_point_size = n_channels * DATA_BYTE_SIZE
@@ -74,12 +70,13 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_e
 
     # For all file types, loop through all data packets, extracting data based on page sizing
     file_size = os.path.getsize(nsx_file.datafile.name)
-    while nsx_file.datafile.tell() <= file_size:
+    while nsx_file.datafile.tell() < file_size:
 
         # Get the time and length of this data packet
         nsx_file.datafile.seek(1, 1)
         timestamp = unpack("<Q", nsx_file.datafile.read(8))[0]
         packet_pts = unpack("<I", nsx_file.datafile.read(4))[0]
+        packet_start = nsx_file.datafile.tell()
         if packet_pts == 0:
             continue  # This packet is empty
         meta = (timestamp, packet_pts)
@@ -95,13 +92,14 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_e
 
         # Determine the altered start of the read if the start timestamp is within this packet
         start_ts = max(read_start_ts, timestamp) if read_start_ts else timestamp
-        read_start = abs(start_ts - timestamp) * data_point_size
-        nsx_file.datafile.seek(read_start, 1)
+        read_start = packet_start + abs(start_ts - timestamp) * data_point_size
+        nsx_file.datafile.seek(read_start, 0)
 
         # Determine the altered end of the read in this packet if the end timestamp is in this packet
         end_ts = min(read_end_ts, packet_end_ts) if read_end_ts else packet_end_ts
-        read_end = abs(end_ts - timestamp) * data_point_size
+        read_end = packet_start + abs(end_ts - timestamp) * data_point_size
 
+        # Determine the number of sections that will be needed to read all the data in this packet
         read_size = read_end - read_start
         num_loops = int(ceil(read_size / section_size))
 
@@ -110,13 +108,18 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_e
             location = nsx_file.datafile.tell()
 
             # This is the last section we will be reading in this packet. Adjust the size appropriately
-            if location + section_size > read_end:
-                section_size = read_end - location
+            if location == read_end:
+                print(f'Hit the end of the packet with {num_loops-loop-1} out of {num_loops} section loops left')
+                break
+            elif location > read_end:
+                raise IndexError("We've read past the end of the packet in an NsX file!?")
+            elif location + section_size > read_end:
+                this_section_size = read_end - location
             else:
                 # Otherwise read the full section
-                section_size = section_size
+                this_section_size = section_size
 
-            num_pts = section_size // data_point_size
+            num_pts = this_section_size // data_point_size
             shape = (int(num_pts), n_channels)
             memory_map = np.memmap(
                 nsx_file.datafile,
@@ -125,8 +128,6 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_e
                 offset=location,
                 shape=shape,
             )
-            if elec_id_indices:
-                memory_map = memory_map[:, elec_id_indices]
 
             yield meta, memory_map
 
@@ -134,4 +135,20 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_e
             meta = None  # We only return the packet metadata with the first section of the packet
 
             # Move the file pointer explicitly since np.memmap is unreliable
-            nsx_file.datafile.seek(location + section_size, 0)
+            nsx_file.datafile.seek(location + this_section_size, 0)
+
+
+def iter_nsx_timestamps(nsx_file):
+    """Loop through and quickly read off all the packet headers in an NsX file"""
+    data_point_size = nsx_file.basic_header['ChannelCount'] * DATA_BYTE_SIZE
+
+    file_size = os.path.getsize(nsx_file.datafile.name)
+    ts_pointer = nsx_file.basic_header['BytesInHeader'] + 1
+    while ts_pointer < file_size:
+        nsx_file.datafile.seek(ts_pointer, 0)
+        timestamp = unpack('<Q', nsx_file.datafile.read(8))[0]
+        packet_points = unpack('<I', nsx_file.datafile.read(4))[0]
+
+        yield timestamp, packet_points
+
+        ts_pointer = nsx_file.datafile.tell() + (packet_points * data_point_size) + 1

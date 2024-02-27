@@ -11,7 +11,7 @@ from struct import unpack
 
 import pandas as pd
 
-from pyNsXStitch.streamers import stream_nev_packets
+from pyNsXStitch.streamers import stream_nev_packets, iter_nsx_timestamps
 
 nsx_copy_headers = []
 REC_EVENT_PACKET_ID = 65529
@@ -63,22 +63,6 @@ def get_nsx_duration(nsx_filepath):
     return get_nsx_end_time(nsx_filepath) - get_nsx_start_time(nsx_filepath)
 
 
-def iter_nsx_timestamps(nsx_file):
-    """Loop through and quickly read off all the packet headers in an NsX file"""
-    data_point_size = nsx_file.basic_header['ChannelCount'] * DATA_BYTE_SIZE
-
-    file_size = os.path.getsize(nsx_file.datafile.name)
-    ts_pointer = nsx_file.basic_header['BytesInHeader'] + 1
-    while ts_pointer < file_size:
-        nsx_file.datafile.seek(ts_pointer, 0)
-        timestamp = unpack('<Q', nsx_file.datafile.read(8))[0]
-        packet_points = unpack('<I', nsx_file.datafile.read(4))[0]
-
-        yield timestamp, packet_points
-
-        ts_pointer = nsx_file.datafile.tell() + (packet_points * data_point_size) + 1
-
-
 def get_nsx_end_time(nsx_filepath):
     """Return the end of the NsX file in time elapsed (seconds) since the recording start"""
     nsx_file = NsxFile(nsx_filepath)
@@ -87,11 +71,12 @@ def get_nsx_end_time(nsx_filepath):
         last_ts = timestamp
         packet_size = packet_points
 
-    end_ts = last_ts + packet_size
-    sample_freq = nsx_file.basic_header['SampleResolution']
+    sample_freq = int(nsx_file.basic_header['SampleResolution'] / nsx_file.basic_header['Period'])
+    ts_freq = nsx_file.basic_header['TimeStampResolution']
+    end_ts = last_ts + int(packet_size * ts_freq / sample_freq)
 
     del nsx_file
-    return end_ts / sample_freq
+    return end_ts / ts_freq
 
 
 def get_nsx_start_time(nsx_filepath):
@@ -198,5 +183,18 @@ def get_nev_rec_start(nev_file):
         recording_start = None  # We didn't find any recording start packets
 
     return recording_start
+
+
+def read_at(filepath, read_loc, n_bytes=10):
+    """
+    Naively read a few bytes from a file at the given location.
+
+    This function is mainly here for debugging and spot/sanity checking purposes. Not an efficient way to read data
+    """
+    read = None
+    with open(filepath, 'rb') as f:
+        f.seek(read_loc, 0)
+        read = f.read(n_bytes)
+    return read
 
 
