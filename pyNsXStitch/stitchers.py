@@ -29,11 +29,15 @@ class StitchedNeVFile(object):
     def iter_data(self, gui_updater=None):
         """Iterate through all the data packets in a file"""
         max_packet = self.get_max_packet_size()
+        if self.start_time is not None and self.end_time is not None:
+            duration = self.end_time - self.start_time
+        else:
+            duration = None
+
         for file_i, filename in enumerate(self.files):
             nev_file = NevFile(filename)
-            duration = self.end_time - self.start_time
             for meta, packet_data in stream_nev_packets(nev_file, start=self.start_time, end=self.end_time):
-                if gui_updater is not None:
+                if gui_updater is not None and duration is not None:
                     elapsed = meta[0] - self.start_time
                     gui_updater(100 * elapsed / duration)
                 packet_id = meta[1]
@@ -92,7 +96,9 @@ class StitchedNsXFile(object):
 
         See helpers.stream_nsx_data for details about how the data is streamed out from each individual file
         """
-        duration = self.end_time - self.start_time
+        duration = self.end_time - self.start_time \
+            if self.end_time is not None and self.start_time is not None \
+            else None
         for file_i, filename in enumerate(self.files):
             nsx_file = NsxFile(filename)
             streamer = stream_nsx_data(
@@ -102,9 +108,11 @@ class StitchedNsXFile(object):
                 elec_ids=self.parse_elec_ids()
             )
             for meta, data_block in streamer:
-                if gui_updater is not None and meta is not None:
+                if gui_updater is not None and meta is not None and duration is not None:
                     elapsed = meta[0] - self.start_time
                     gui_updater(100 * elapsed / duration)
+                if meta is not None:
+                    pass
                 yield meta, data_block
 
     def parse_elec_ids(self):
@@ -166,7 +174,7 @@ class StitchedNsXFile(object):
 
             # Data blocks at the start of a packet have timestamps. Write them back at start
             if meta is not None:
-                print(meta)
+                print(f'Timestamp: {meta[0]}  NPoints:{meta[1]}')
                 out_file.write(pack('x'))
                 out_file.write(pack('<Q', meta[0]))
                 out_file.write(pack('<I', meta[1]))
