@@ -74,7 +74,7 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_e
 
     # For all file types, loop through all data packets, extracting data based on page sizing
     file_size = os.path.getsize(nsx_file.datafile.name)
-    while nsx_file.datafile.tell() <= file_size:
+    while nsx_file.datafile.tell() < file_size:
 
         # Get the time and length of this data packet
         nsx_file.datafile.seek(1, 1)
@@ -111,12 +111,12 @@ def stream_nsx_data(nsx_file, elec_ids=ELEC_ID_DEF, read_start_time=None, read_e
 
             # This is the last section we will be reading in this packet. Adjust the size appropriately
             if location + section_size > read_end:
-                section_size = read_end - location
+                this_section_size = read_end - location
             else:
                 # Otherwise read the full section
-                section_size = section_size
+                this_section_size = section_size
 
-            num_pts = section_size // data_point_size
+            num_pts = this_section_size // data_point_size
             shape = (int(num_pts), n_channels)
             memory_map = np.memmap(
                 nsx_file.datafile,
