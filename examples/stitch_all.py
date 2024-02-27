@@ -7,10 +7,10 @@ from pyNsXStitch.stitchers import StitchedNsXFile, StitchedNeVFile
 from pyNsXStitch.helpers import get_all_streamed_files
 
 # Replace this with the absolute path to the directory that contains your TOC-mode recorded files
-FILE_SOURCE = r'D:\Work\DataNet\TestData\sources\blackrock\20231129-161156'
+FILE_SOURCE = r"\path\to\folder\with\toc\recording"
 
 # Replace this with the absolute path to the directory that you want to output your stitched files to
-OUT_PATH = r'D:\Work\DataNet\TestData\sources\blackrock\testing'
+OUT_PATH = r'\path\to\output\folder'
 
 # This will be the name of all the stitched files
 FILE_NAME = 'stitched'
