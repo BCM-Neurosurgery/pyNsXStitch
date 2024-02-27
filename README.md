@@ -3,10 +3,10 @@
 Small helper library to stitch together Blackrock NeV and NsX files from a chunked recording into task specific files 
 based on comments
 
-**** WARNING: THIS CODE REMAINS AS YET UNVERIFIED AND MAKES NO GUARANTEE THAT THE OUTPUT NSX FILES WILL CONTAIN
-INDIVIDUAL MISSED PACKETS OR DATA POINTS***
+**** WARNING: THIS CODE IS STILL IN THE TEST/VERIFICATION STAGE. ***
 
-(though it does generally work well as far as I can tell...)
+Please report any bugs and issues you find as issues on the github repo:
+https://github.com/BCM-Neurosurgery/pyNsXStitch/issues
 
 ## Installation
 
