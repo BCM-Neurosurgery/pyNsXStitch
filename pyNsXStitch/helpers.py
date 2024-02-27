@@ -201,3 +201,16 @@ def get_nev_rec_start(nev_file):
     return recording_start
 
 
+def read_at(filepath, read_loc, n_bytes=10):
+    """
+    Naively read a few bytes from a file at the given location.
+
+    This function is mainly here for debugging and spot/sanity checking purposes. Not an efficient way to read data
+    """
+    read = None
+    with open(filepath, 'rb') as f:
+        f.seek(read_loc, 0)
+        read = f.read(n_bytes)
+    return read
+
+
