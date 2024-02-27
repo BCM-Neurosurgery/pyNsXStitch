@@ -64,6 +64,8 @@ setting file). If a batch is at the start of one of the packets stored in the fi
 a tuple of the timestamp at the start of the packet, and the size of the full packet. Otherwise, the first returned 
 value will be `None`. In all cases, the packet data is a numpy memory_map of the raw data. If the batch extends past the
 end of the packet then it will be truncated.
+  - `iter_nsx_timestamps`: Quickly iterate through all the packets in an NsX file, returning only the headers. Useful 
+primarily for checking the size and duration of the NsX file, as well as assessing data drop rates
 
 #### Helpers
 These are small atomic functions that provide helpful utilities when performing stitching. Some of the most useful ones

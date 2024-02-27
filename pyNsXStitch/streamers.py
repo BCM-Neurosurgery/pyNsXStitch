@@ -136,3 +136,19 @@ def stream_nsx_data(nsx_file, read_start_time=None, read_end_time=None):
 
             # Move the file pointer explicitly since np.memmap is unreliable
             nsx_file.datafile.seek(location + this_section_size, 0)
+
+
+def iter_nsx_timestamps(nsx_file):
+    """Loop through and quickly read off all the packet headers in an NsX file"""
+    data_point_size = nsx_file.basic_header['ChannelCount'] * DATA_BYTE_SIZE
+
+    file_size = os.path.getsize(nsx_file.datafile.name)
+    ts_pointer = nsx_file.basic_header['BytesInHeader'] + 1
+    while ts_pointer < file_size:
+        nsx_file.datafile.seek(ts_pointer, 0)
+        timestamp = unpack('<Q', nsx_file.datafile.read(8))[0]
+        packet_points = unpack('<I', nsx_file.datafile.read(4))[0]
+
+        yield timestamp, packet_points
+
+        ts_pointer = nsx_file.datafile.tell() + (packet_points * data_point_size) + 1

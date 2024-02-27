@@ -11,7 +11,7 @@ from struct import unpack
 
 import pandas as pd
 
-from pyNsXStitch.streamers import stream_nev_packets
+from pyNsXStitch.streamers import stream_nev_packets, iter_nsx_timestamps
 
 nsx_copy_headers = []
 REC_EVENT_PACKET_ID = 65529
@@ -61,22 +61,6 @@ def get_support_files(directory, full_paths=False):
 def get_nsx_duration(nsx_filepath):
     """Get the duration of this data file in seconds"""
     return get_nsx_end_time(nsx_filepath) - get_nsx_start_time(nsx_filepath)
-
-
-def iter_nsx_timestamps(nsx_file):
-    """Loop through and quickly read off all the packet headers in an NsX file"""
-    data_point_size = nsx_file.basic_header['ChannelCount'] * DATA_BYTE_SIZE
-
-    file_size = os.path.getsize(nsx_file.datafile.name)
-    ts_pointer = nsx_file.basic_header['BytesInHeader'] + 1
-    while ts_pointer < file_size:
-        nsx_file.datafile.seek(ts_pointer, 0)
-        timestamp = unpack('<Q', nsx_file.datafile.read(8))[0]
-        packet_points = unpack('<I', nsx_file.datafile.read(4))[0]
-
-        yield timestamp, packet_points
-
-        ts_pointer = nsx_file.datafile.tell() + (packet_points * data_point_size) + 1
 
 
 def get_nsx_end_time(nsx_filepath):
