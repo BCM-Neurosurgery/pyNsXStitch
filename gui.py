@@ -322,7 +322,7 @@ class StitcherGUI(object):
                 found_name = row['Comment'].split(' ')[1]
                 break
 
-        self.notify('Found a TASKID comment, using it as the output name')
+        self.notify(f'Updating output name')
         self.file_name.set(found_name)
 
     def get_row_color(self, row_idx, row_ts):
