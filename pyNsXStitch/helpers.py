@@ -180,7 +180,7 @@ def get_nev_rec_start(nev_file):
         else:
             continue  # Keep looking for the recording event packer
     else:
-        recording_start = None  # We didn't find any recording start packets
+        recording_start = 0  # We didn't find any recording start packets
 
     return recording_start
 
