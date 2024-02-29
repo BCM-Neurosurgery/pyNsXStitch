@@ -61,9 +61,6 @@ class StitchedNeVFile(object):
         header_size = origin.basic_header['BytesInHeader']
         out_file.write(origin.datafile.read(header_size))
 
-        # Set the file pointer to the end of the header, so we are ready to write packets
-        out_file.seek(header_size, 0)
-
     def write(self, out_file, gui_updater=None):
 
         self.write_headers(out_file)
