@@ -57,17 +57,12 @@ class StitchedNeVFile(object):
         origin = NevFile(self.files[0])
         origin.datafile.seek(0, 0)
         out_file.seek(0, 0)
-        out_file.write(origin.datafile.read(origin.basic_header['BytesInHeader']))
 
-        # # The only header that we need to update is the Application to Create File
-        # old_application = origin.basic_header['CreatingApplication']
-        # combo = f'{old_application} + NsXStitcher v0.1'
-        # combo_bytes = pack('32s', combo.encode('ANSI'))
-        # out_file.seek(self.create_file_loc, 0)
-        # out_file.write(combo_bytes)
+        header_size = origin.basic_header['BytesInHeader']
+        out_file.write(origin.datafile.read(header_size))
 
         # Set the file pointer to the end of the header, so we are ready to write packets
-        out_file.seek(origin.basic_header['BytesInHeader'], 0)
+        out_file.seek(header_size, 0)
 
     def write(self, out_file, gui_updater=None):
 
