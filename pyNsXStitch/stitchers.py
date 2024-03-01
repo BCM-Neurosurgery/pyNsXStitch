@@ -129,7 +129,7 @@ class StitchedNsXFile(object):
             # Data blocks at the start of a packet have timestamps. Write them back at start
             if meta is not None:
                 print(f'Timestamp: {meta[0]}  NPoints:{meta[1]}')
-                out_file.write(pack('x'))
+                out_file.write(b'\x01')
                 out_file.write(pack('<Q', meta[0]))
                 out_file.write(pack('<I', meta[1]))
 
