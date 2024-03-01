@@ -111,6 +111,11 @@ class StitchedNsXFile(object):
         origin = NsxFile(self.files[0])
         origin.datafile.seek(0, 0)
 
+        # Verify that the NsX file is written in the supported format
+        if origin.basic_header['FileTypeID'] != 'BRSMPGRP':
+            type_here = origin.basic_header['FileTypeID']
+            raise TypeError(f'Only BRSMPGRP type NsX files are currently supported! (found {type_here})')
+
         # Make sure we're writing to hte very start of the new file
         out_file.seek(0, 0)
 
