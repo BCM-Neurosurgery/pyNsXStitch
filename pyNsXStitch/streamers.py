@@ -79,7 +79,6 @@ def stream_nsx_data(nsx_file, read_start_time=None, read_end_time=None):
         packet_start = nsx_file.datafile.tell()
         if packet_pts == 0:
             continue  # This packet is empty
-        meta = (timestamp, packet_pts)
 
         # Determine whether we should read this packet from the file
         packet_end_ts = timestamp + packet_pts
@@ -98,10 +97,16 @@ def stream_nsx_data(nsx_file, read_start_time=None, read_end_time=None):
         # Determine the altered end of the read in this packet if the end timestamp is in this packet
         end_ts = min(read_end_ts, packet_end_ts) if read_end_ts else packet_end_ts
         read_end = packet_start + abs(end_ts - timestamp) * data_point_size
+        if end_ts != packet_end_ts:
+            pass
 
         # Determine the number of sections that will be needed to read all the data in this packet
         read_size = read_end - read_start
         num_loops = int(ceil(read_size / section_size))
+
+        # Save the header for this packet after taking into account any potential slicing
+        n_points = int(round(read_size / data_point_size))  # We're just rounding floating point errors here
+        meta = (start_ts, n_points)
 
         # Extract the data in the packet section by section to avoid memory constraints
         for loop in range(num_loops):
