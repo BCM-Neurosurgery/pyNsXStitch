@@ -340,6 +340,14 @@ class StitcherGUI(object):
             row_color = ['SkyBlue1', 'SteelBlue1'][row_idx % 2]
         return row_color
 
+    def mouse_scroll(self, event):
+        shift = (event.state & 0x1) != 0
+        scroll = -1 if event.delta > 0 else 1
+        if shift:
+            self.table_area.xview_scroll(scroll, "units")
+        else:
+            self.table_area.yview_scroll(scroll, "units")
+
     def build_comment_table(self):
 
         col_widths = [100, 100, 250, 30, 30]
@@ -356,6 +364,7 @@ class StitcherGUI(object):
             width=canvas_width, height=500,
             yscrollcommand=self.scroll.set
         )
+        self.table_area.bind('<MouseWheel>', self.mouse_scroll)
 
         # Build the headers:
         for i, col in enumerate(self.comment_df.columns):
@@ -467,7 +476,7 @@ class StitcherGUI(object):
             self.comment_frame.destroy()
 
         self.comment_frame = tk.Frame(master=self.time_frame, pady=10, padx=20, height=300, borderwidth=1)
-        self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL)
+        self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL, background='white')
         self.scroll.pack(side=tk.RIGHT, fill='y')
         self.build_comment_table()
 
