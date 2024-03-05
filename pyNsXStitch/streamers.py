@@ -57,7 +57,6 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
     """
 
     # Initializations
-    ts_freq = nsx_file.basic_header['TimeStampResolution']
     n_channels = nsx_file.basic_header["ChannelCount"]
     data_point_size = n_channels * DATA_BYTE_SIZE
     nsx_file.datafile.seek(0, 0)
