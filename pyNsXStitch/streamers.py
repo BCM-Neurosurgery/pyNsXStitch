@@ -93,8 +93,6 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
         # Determine the altered end of the read in this packet if the end timestamp is in this packet
         end_ts = min(read_end_ts, packet_end_ts) if read_end_ts else packet_end_ts
         read_end = packet_start + abs(end_ts - timestamp) * data_point_size
-        if end_ts != packet_end_ts:
-            pass
 
         # Determine the number of sections that will be needed to read all the data in this packet
         read_size = read_end - read_start
