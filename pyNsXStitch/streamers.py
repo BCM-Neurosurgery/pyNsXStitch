@@ -6,13 +6,13 @@ import numpy as np
 from brpylib.brpylib import ELEC_ID_DEF, check_elecid, DATA_BYTE_SIZE, DATA_PAGING_SIZE
 
 
-def stream_nev_packets(nev_file, start=0, end=None):
+def stream_nev_packets(nev_file, start_ts=0, end_ts=None):
     """
     Iterator that sequentially yields all the packets saved in the NeV files
 
     :param nev_file: NeVFile object from which to stream packets
-    :param start:
-    :param end:
+    :param start_ts:
+    :param end_ts:
     :return:
     """
 
@@ -28,10 +28,10 @@ def stream_nev_packets(nev_file, start=0, end=None):
 
         timestamp = unpack("<Q", nev_file.datafile.read(ts_size))[0]
 
-        if end is not None and timestamp > end:
+        if end_ts is not None and timestamp > end_ts:
             # This packet was recorded after the end of our interval. We can finish looping
             break
-        elif start is not None and timestamp < start:
+        elif start_ts is not None and timestamp < start_ts:
             # This packet was recorded before the start of our interval. Step to the next packet
             nev_file.datafile.seek(packet_data_size, 1)
         else:
@@ -41,7 +41,7 @@ def stream_nev_packets(nev_file, start=0, end=None):
             yield (timestamp, packet_id), raw_data
 
 
-def stream_nsx_data(nsx_file, read_start_time=None, read_end_time=None):
+def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
     """
     This function is used to save a subset of data based on electrode IDs, file sizing, or file data time.  If
     both file_time_s and file_size are passed, it will default to file_time_s and determine sizing accordingly.
@@ -51,7 +51,6 @@ def stream_nsx_data(nsx_file, read_start_time=None, read_end_time=None):
     section. These sections are of fixe maximum size, and the size is set by DATA_PAGING_SIZE
 
     :param nsx_file:
-    :param elec_ids:   [optional] {list}  List of elec_ids to extract (e.g., [13])
     :param read_start_ts:  [optional]
     :param read_end_ts:    [optional]
     :yield:
@@ -82,8 +81,6 @@ def stream_nsx_data(nsx_file, read_start_time=None, read_end_time=None):
 
         # Determine whether we should read this packet from the file
         packet_end_ts = timestamp + packet_pts
-        read_start_ts = round(read_start_time * ts_freq) if read_start_time else None
-        read_end_ts = round(read_end_time * ts_freq) if read_end_time else None
         if read_start_ts and packet_end_ts < read_start_ts:
             continue  # This entire packet is before the read start timestamp. Move to the next packet
         if read_end_ts and read_end_ts < timestamp:
