@@ -59,11 +59,11 @@ def get_support_files(directory, full_paths=False):
 
 
 def get_nsx_duration(nsx_filepath):
-    """Get the duration of this data file in seconds"""
-    return get_nsx_end_time(nsx_filepath) - get_nsx_start_time(nsx_filepath)
+    """Get the duration of this data file in the file's native timestamp units"""
+    return get_nsx_end_timestamp(nsx_filepath) - get_nsx_start_timestamp(nsx_filepath)
 
 
-def get_nsx_end_time(nsx_filepath):
+def get_nsx_end_timestamp(nsx_filepath):
     """Return the end of the NsX file in time elapsed (seconds) since the recording start"""
     nsx_file = NsxFile(nsx_filepath)
     last_ts, packet_size = None, None
@@ -76,33 +76,33 @@ def get_nsx_end_time(nsx_filepath):
     end_ts = last_ts + int(packet_size * ts_freq / sample_freq)
 
     del nsx_file
-    return end_ts / ts_freq
+    return end_ts
 
 
-def get_nsx_start_time(nsx_filepath):
+def get_nsx_start_timestamp(nsx_filepath):
     """Get the start time (in seconds) of this data file from the header of the first data packet"""
     try:
         nsx = NsxFile(nsx_filepath)
         end_of_header = nsx.basic_header["BytesInHeader"]
         nsx.datafile.seek(end_of_header + 1, 0)  # Move to the start of data, also skipping the null byte
         timestamp = unpack("<Q", nsx.datafile.read(8))[0]
-        return timestamp / nsx.basic_header['TimeStampResolution']
+        return timestamp
     except Exception as e:
         raise e
     finally:
         del nsx
 
 
-def find_nsx_in_range(nsx_filepaths, start, end, subtract_offset=False):
+def find_nsx_in_range(nsx_filepaths, start_ts, end_ts, subtract_offset=False):
     """Find all nsx files that contain data in the given range (time elapsed in seconds)"""
     in_range = False
     files = []
     for nsx_fp in nsx_filepaths:
-        file_start = get_nsx_start_time(nsx_fp)
-        file_end = get_nsx_end_time(nsx_fp)
-        if file_start <= start < file_end:
+        file_start = get_nsx_start_timestamp(nsx_fp)
+        file_end = get_nsx_end_timestamp(nsx_fp)
+        if file_start <= start_ts < file_end:
             in_range = True
-        elif end <= file_end:
+        elif end_ts <= file_end:
             # We've found the end of the range, we can quit looping (but still include this file)
             files.append(nsx_fp)
             break
@@ -161,12 +161,7 @@ def search_nev_comments(nev_filenames, task_name):
     # TODO: Make a smarter selection method, this is temp for testing
     start, end = match['TimeStamps'].iloc[1], match['TimeStamps'].iloc[2]
 
-    # Convert the timestamps to seconds since the start of the recording
-    nev_file = NevFile(nev_filenames[0])
-    rec_origin = get_nev_rec_start(nev_file)
-    ts_per_sec = nev_file.basic_header['TimeStampResolution']
-    start_s, end_s = round(start/ts_per_sec, 6), round(end/ts_per_sec, 6)
-    return start_s, end_s
+    return start, end
 
 
 def get_nev_rec_start(nev_file):

@@ -17,8 +17,8 @@ class StitchedNeVFile(object):
 
     def __init__(self, files_to_stitch, start=None, end=None):
         self.files = files_to_stitch
-        self.start_time = start
-        self.end_time = end
+        self.start_timestamp = start
+        self.end_timestamp = end
         self.skip_packet_ids = None
 
     def get_max_packet_size(self):
@@ -29,16 +29,17 @@ class StitchedNeVFile(object):
     def iter_data(self, gui_updater=None):
         """Iterate through all the data packets in a file"""
         max_packet = self.get_max_packet_size()
-        if self.start_time is not None and self.end_time is not None:
-            duration = self.end_time - self.start_time
+        if self.start_timestamp is not None and self.end_timestamp is not None:
+            duration = self.end_timestamp - self.start_timestamp
         else:
             duration = None
 
         for file_i, filename in enumerate(self.files):
             nev_file = NevFile(filename)
-            for meta, packet_data in stream_nev_packets(nev_file, start=self.start_time, end=self.end_time):
+            streamer = stream_nev_packets(nev_file, start_ts=self.start_timestamp, end_ts=self.end_timestamp)
+            for meta, packet_data in streamer:
                 if gui_updater is not None and duration is not None:
-                    elapsed = meta[0] - self.start_time
+                    elapsed = meta[0] - self.start_timestamp
                     gui_updater(100 * elapsed / duration)
                 packet_id = meta[1]
                 if self.skip_packet_ids is not None and packet_id in self.skip_packet_ids:
@@ -78,8 +79,8 @@ class StitchedNsXFile(object):
     def __init__(self, files_to_stitch, start=None, end=None):
 
         self.files = files_to_stitch
-        self.start_time = start
-        self.end_time = end
+        self.start_timestamp = start
+        self.end_timestamp = end
 
     def iter_data(self, gui_updater=None):
         """
@@ -87,19 +88,19 @@ class StitchedNsXFile(object):
 
         See helpers.stream_nsx_data for details about how the data is streamed out from each individual file
         """
-        duration = self.end_time - self.start_time \
-            if self.end_time is not None and self.start_time is not None \
+        duration = self.end_timestamp - self.start_timestamp \
+            if self.end_timestamp is not None and self.start_timestamp is not None \
             else None
         for file_i, filename in enumerate(self.files):
             nsx_file = NsxFile(filename)
             streamer = stream_nsx_data(
                 nsx_file,
-                read_start_time=self.start_time,
-                read_end_time=self.end_time
+                read_start_ts=self.start_timestamp,
+                read_end_ts=self.end_timestamp
             )
             for meta, data_block in streamer:
                 if gui_updater is not None and meta is not None and duration is not None:
-                    elapsed = meta[0] - self.start_time
+                    elapsed = meta[0] - self.start_timestamp
                     gui_updater(100 * elapsed / duration)
                 if meta is not None:
                     pass

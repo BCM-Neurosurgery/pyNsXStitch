@@ -21,8 +21,8 @@ def run_stitch_async(gui):
         gui.notify(f'Starting stitching process')
         source_dir = gui.source_dir.get()
         output_dir = gui.output_dir.get()
-        start = round(gui.start_time.get() + (gui.nev_start / gui.ts_freq), 6)
-        end = round(gui.end_time.get() + (gui.nev_start / gui.ts_freq), 6)
+        start = round(gui.start_timestamp.get())
+        end = round(gui.end_timestamp.get())
         try:
             os.makedirs(output_dir, exist_ok=True)
         except FileNotFoundError:
