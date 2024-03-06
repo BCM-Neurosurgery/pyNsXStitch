@@ -49,7 +49,7 @@ def run_stitch_async(gui):
             gui.notify(f'Found {len(in_range)} files in the selected time range')
             if in_range:
                 nsx_start = datetime.now()
-                nsx_stitch = StitchedNsXFile(in_range, start, end, aggressive_concat=gui.aggressive_stitching)
+                nsx_stitch = StitchedNsXFile(in_range, start, end, aggressive_concat=gui.aggressive_stitch.get())
                 with open(gui.get_out_filepath(filetype.lower()), 'wb') as nsx_out:
                     nsx_stitch.write(nsx_out, gui_updater=gui.update_progressbar)
                 elapsed = (datetime.now() - nsx_start)
