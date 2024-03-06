@@ -76,11 +76,14 @@ class StitchedNeVFile(object):
 
 class StitchedNsXFile(object):
 
-    def __init__(self, files_to_stitch, start=None, end=None):
+    max_packet_len = 2**32-1
+
+    def __init__(self, files_to_stitch, start=None, end=None, aggressive_concat=False):
 
         self.files = files_to_stitch
         self.start_timestamp = start
         self.end_timestamp = end
+        self.concat_packets = aggressive_concat
 
     def iter_data(self, gui_updater=None):
         """
@@ -124,22 +127,61 @@ class StitchedNsXFile(object):
         bytes_in_headers = origin.basic_header['BytesInHeader']
         out_file.write(origin.datafile.read(bytes_in_headers))
 
+        sample_rate = (origin.basic_header['SampleResolution'] / origin.basic_header['Period'])
+        ts_freq = origin.basic_header['TimeStampResolution']
+        return ts_freq / sample_rate
+
     def write(self, out_file, gui_updater=None):
 
-        self.write_headers(out_file)
+        ts_per_sample = self.write_headers(out_file)
 
         prev_loop_t = datetime.now()
         durations = []
+        last_ts = None
+        prev_n_points_loc = None
         for meta, data_block in self.iter_data(gui_updater=gui_updater):
 
             # Data blocks at the start of a packet have timestamps. Write them back at start
             if meta is not None:
-                print(f'Timestamp: {meta[0]}  NPoints:{meta[1]}')
-                out_file.write(b'\x01')
-                out_file.write(pack('<Q', meta[0]))
-                out_file.write(pack('<I', meta[1]))
+
+                start_ts, n_points = meta
+                print(f'Processing new packet Timestamp: {start_ts}  NPoints:{n_points}')
+
+                stitch_w_prev = False
+                if self.concat_packets and last_ts is not None:
+                    # We're running in agressive stitching mode, so check for data drops
+                    packet_gap_ts = start_ts - last_ts
+                    print(f'  Packet gap: {packet_gap_ts}')
+                    if packet_gap_ts <= ts_per_sample:
+                        print(f'  Concatenating packets')
+                        stitch_w_prev = True  # No samples were missed between packets
+
+                if stitch_w_prev:
+                    # We write this packet as part of the previous packet, update the previous packet header with
+                    # the number of additional data points that will be written here
+                    continue_loc = out_file.tell()
+                    out_file.seek(prev_n_points_loc, 0)
+                    prev_n_points = unpack('<I', out_file.read(4))[0]
+                    new_n_points = prev_n_points + n_points
+                    if new_n_points > self.max_packet_len:
+                        raise OverflowError('Max packet length exceeded!\n'
+                                            '  Choose a shorter time range or disable aggressive concatenation!')
+                    out_file.seek(prev_n_points_loc, 0)
+                    out_file.write(pack('<I', new_n_points))
+
+                    # Reset the write head back to where we were to continue writing data
+                    out_file.seek(continue_loc, 0)
+
+                else:
+                    # Write this packet as a new packets
+                    out_file.write(b'\x01')
+                    out_file.write(pack('<Q', start_ts))
+                    prev_n_points_loc = out_file.tell()  # Save this data location for future reference
+                    out_file.write(pack('<I', n_points))
+                    last_ts = start_ts  # Reset the ts counter to the start of this packet
 
             out_file.write(data_block)
+            last_ts += len(data_block) * ts_per_sample  # Increment ts counter to timestamp of the last written point
 
             loop_end = datetime.now()
             loop_duration = loop_end - prev_loop_t
