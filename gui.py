@@ -50,7 +50,7 @@ def run_stitch_async(gui):
             if in_range:
                 nsx_start = datetime.now()
                 nsx_stitch = StitchedNsXFile(in_range, start, end, aggressive_concat=gui.aggressive_stitch.get())
-                with open(gui.get_out_filepath(filetype.lower()), 'wb') as nsx_out:
+                with open(gui.get_out_filepath(filetype.lower()), 'wb+') as nsx_out:
                     nsx_stitch.write(nsx_out, gui_updater=gui.update_progressbar)
                 elapsed = (datetime.now() - nsx_start)
                 gui.notify(f'Finished stitching {filetype} files ({round(elapsed.total_seconds(), 4)} s)')
