@@ -49,7 +49,7 @@ def run_stitch_async(gui):
             gui.notify(f'Found {len(in_range)} files in the selected time range')
             if in_range:
                 nsx_start = datetime.now()
-                nsx_stitch = StitchedNsXFile(in_range, start, end)
+                nsx_stitch = StitchedNsXFile(in_range, start, end, aggressive_concat=gui.aggressive_stitching)
                 with open(gui.get_out_filepath(filetype.lower()), 'wb') as nsx_out:
                     nsx_stitch.write(nsx_out, gui_updater=gui.update_progressbar)
                 elapsed = (datetime.now() - nsx_start)
@@ -130,6 +130,7 @@ class StitcherGUI(object):
         self.start_timestamp = tk.IntVar(master=self.root, value=None)
         self.end_timestamp = tk.IntVar(master=self.root, value=None)
         self.patient_id = tk.StringVar(master=self.root, value=None)
+        self.aggressive_stitch = tk.BooleanVar(master=self.root, value=False)
 
         # Additional important values to keep track of
         self.full_comment_df = self.init_comments()
@@ -287,6 +288,10 @@ class StitcherGUI(object):
         tk.Button(master=buttons, text='Remember', command=self.set_name).pack(side=tk.RIGHT, anchor=tk.N)
         tk.Button(master=buttons, text='Reset', command=self.reset_name).pack(side=tk.RIGHT, anchor=tk.N)
         buttons.pack(side=tk.TOP, anchor=tk.E)
+
+        tk.Label(master=inputs, text="More Options").pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
+        stitch = tk.Checkbutton(master=inputs, text='Aggressive Stitch', variable=self.aggressive_stitch)
+        stitch.pack(side=tk.TOP, anchor=tk.E)
 
         inputs.pack(side=tk.LEFT, anchor=tk.N)
 
