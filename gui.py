@@ -88,8 +88,9 @@ def load_dir_async(gui):
         gui.streamed_files = get_all_streamed_files(gui.source_dir.get(), full_paths=True)
         gui.update_patient_id()
         gui.notify(f'Found {len(gui.streamed_files["NeV"])} NeV files')
-        gui.notify(f'Loading comments from NeV...')
 
+        # Iter through all the comment packets in all files
+        gui.notify(f'Loading comments from NeV...')
         timestamps, comments = [], []
         n_files = len(gui.streamed_files["NeV"])
         for i, file in enumerate(gui.streamed_files["NeV"]):
@@ -100,9 +101,10 @@ def load_dir_async(gui):
                 text_data = raw_data[6:]
                 comment = text_data.decode('ASCII').rstrip('\x00')  # TODO: handle other charsets
                 comments.append(comment)
-
         gui.update_progressbar(100)
         gui.notify(f'Found {len(timestamps)} comments...')
+
+        # Convert to a dataframe for drawing to the GUI
         timestamps = np.array(timestamps)
         first_nev = NevFile(gui.streamed_files['NeV'][0])
         gui.nev_start = get_nev_rec_start(first_nev)
