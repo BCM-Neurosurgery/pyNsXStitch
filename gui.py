@@ -133,7 +133,7 @@ class StitcherGUI(object):
         self.root = self.init_window()
 
         # Variables used for tracking the GUI state
-        self.source_dir = tk.StringVar(self.root, value=r'D:\Work\DataNet\TestData\sources\blackrock\20240125-144340')
+        self.source_dir = tk.StringVar(self.root, value=None)
         self.output_dir = tk.StringVar(self.root, value=None)
         self.search_text = tk.StringVar(self.root, value='')
         self.file_name = tk.StringVar(self.root, value='stitched')
@@ -162,11 +162,23 @@ class StitcherGUI(object):
         self.progress_fill = None
         self.progress_bg = None
 
+        # Window element sizes to keep track of
+        self.left_panel_width = 30
+        self.right_panel_width = 30
+        self.center_panel_width = tk.IntVar(master=self.root, value=None)
+        self.set_center_panel_width()
+
+        # Build and place all the gui elements
         self.build_gui()
 
+        # Notify the user and start the GUI
         self.notify('Stitcher GUI version 0.1')
         self.notify('Ready')
+        self.root.bind('Resize', self.update_widths)
         self.root.mainloop()
+
+    def set_center_panel_width(self):
+        self.center_panel_width.set(self.root.winfo_reqwidth() - (self.left_panel_width + self.right_panel_width))
 
     def init_window(self):
         root = tk.Tk()
@@ -176,6 +188,7 @@ class StitcherGUI(object):
             root.state('zoomed')
         root.title('Manual Time Alignment')
         root.geometry("500x500")
+        root.resizable()
         tk.Tk.report_callback_exception = self.disp_error
         warnings.showwarning = self.show_warning
         return root
@@ -205,7 +218,7 @@ class StitcherGUI(object):
         load_btn = tk.Button(
             master=source_frame,
             text='Load',
-            width=20,
+            width=int(self.right_panel_width/2),
             command=self.load_dir,
             background='steelblue1'
         )
@@ -219,19 +232,18 @@ class StitcherGUI(object):
 
         return top_row_frame
 
-    @staticmethod
-    def build_directory_select(parent, label, variable, label_width=20, button_width=15, box_width=100):
+    def build_directory_select(self, parent, label, variable, ):
         """Build a little widget to select a directory on the filesystem"""
         def browse_cmd():
             selected = filedialog.askdirectory(initialdir="/", mustexist=True)
             variable.set(selected)
 
-        source_label = tk.Label(master=parent, text=label, width=label_width)
+        source_label = tk.Label(master=parent, text=label, width=self.left_panel_width)
         source_label.pack(side=tk.LEFT)
-        source_in_box = tk.Entry(master=parent, textvariable=variable, width=box_width)
+        source_in_box = tk.Entry(master=parent, textvariable=variable, width=self.center_panel_width)
         source_in_box.pack(side=tk.LEFT)
-        browse = tk.Button(master=parent, text='Browse', width=button_width, command=browse_cmd)
-        browse.pack(side=tk.LEFT)
+        browse = tk.Button(master=parent, text='Browse', width=int(self.right_panel_width/2), command=browse_cmd)
+        browse.pack(side=tk.LEFT, padx=5)
 
     def build_mid_row(self):
         middle_row = tk.Frame(master=self.root, pady=20)
@@ -300,6 +312,7 @@ class StitcherGUI(object):
         tk.Button(master=buttons, text='Reset', command=self.reset_name).pack(side=tk.RIGHT, anchor=tk.N)
         buttons.pack(side=tk.TOP, anchor=tk.E)
 
+        tk.Label(master=inputs, text="", width=self.left_panel_width, background='black').pack(side=tk.TOP)
         inputs.pack(side=tk.LEFT, anchor=tk.N)
 
         self.reset_comments()
@@ -362,7 +375,7 @@ class StitcherGUI(object):
         col_height = 25
         y_offset = 10
         bttn_offset = 7
-        canvas_width = sum(col_widths)
+        canvas_width = 6 * self.center_panel_width  # sum(col_widths)
         canvas_height = col_height * (1+len(self.comment_df))
 
         self.table_area = tk.Canvas(
