@@ -27,22 +27,32 @@ def get_all_streamed_files(directory, full_paths=False):
     :param full_paths:
     :return: dictionary of file names keyed by blackrock file type
     """
-    files = {
-        "NeV": [],
-    }
     all_files = os.listdir(directory)
-    for file_path in all_files:
-        file_path = os.path.join(directory, file_path) if full_paths else file_path
-        if file_path.endswith(".nev"):
-            files['NeV'].append(file_path)
-        nsx_match = re.search(r'\.ns([0-9])$', file_path)
-        if nsx_match:
-            nsx_num = int(nsx_match.group(1))
-            file_type = f'Ns{nsx_num}'
-            if file_type not in files:
-                files[file_type] = []
-            files[file_type].append(file_path)
-    return files
+    nsp_ids = np.unique([f_name.split('-')[0] for f_name in all_files])
+    nsp_files = {
+        nsp_id: [f_name for f_name in all_files if f_name.startswith(nsp_id)]
+        for nsp_id in nsp_ids
+    }
+    streamed_files = {
+        nsp_id: {"NeV": []} for nsp_id in nsp_ids
+    }
+
+    # Iter through all files for both NSPs
+    for nsp_id, files in nsp_files.items():
+        for file_path in files:
+            file_path = os.path.join(directory, file_path) if full_paths else file_path
+            if file_path.endswith(".nev"):
+                streamed_files[nsp_id]['NeV'].append(file_path)
+            nsx_match = re.search(r'\.ns([0-9])$', file_path)
+            if nsx_match:
+                nsx_num = int(nsx_match.group(1))
+                file_type = f'Ns{nsx_num}'
+                if file_type not in streamed_files[nsp_id]:
+                    streamed_files[nsp_id][file_type] = []
+                streamed_files[nsp_id][file_type].append(file_path)
+
+    streamed_files = {nps: files for nps, files in streamed_files.items() if files['NeV']}
+    return streamed_files
 
 
 def get_support_files(directory, full_paths=False):

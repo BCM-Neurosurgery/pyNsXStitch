@@ -26,13 +26,15 @@ class StitchedNeVFile(object):
         print(packet_sizes)
         return max(packet_sizes)
 
-    def iter_data(self, gui_updater=None):
+    def iter_data(self, gui_updater=None, skip_duplicates=True):
         """Iterate through all the data packets in a file"""
         max_packet = self.get_max_packet_size()
         if self.start_timestamp is not None and self.end_timestamp is not None:
             duration = self.end_timestamp - self.start_timestamp
         else:
             duration = None
+
+        prev_meta, prev_data = [None, None], None
 
         for file_i, filename in enumerate(self.files):
             nev_file = NevFile(filename)
@@ -41,15 +43,20 @@ class StitchedNeVFile(object):
                 if gui_updater is not None and duration is not None:
                     elapsed = meta[0] - self.start_timestamp
                     gui_updater(100 * elapsed / duration)
-                packet_id = meta[1]
-                if self.skip_packet_ids is not None and packet_id in self.skip_packet_ids:
-                    # Detect and skip some packets if we were asked to skip packets of this type
+
+                # Detect and skip some packets if we were asked to skip packets of this type
+                if self.skip_packet_ids is not None and meta[1] in self.skip_packet_ids:
                     continue
+
+                # Check if this packet is a duplicate of a previous packet right before yielding it
+                if skip_duplicates and np.all([prev_meta[i] == meta[i] for i in [0, 1]]) and packet_data == prev_data:
+                    continue  # Timestamp, packet type, and payload were all the same, skip this packet
 
                 # Make sure that all packets from all files are the same size
                 n_bytes_to_pad = (max_packet - self.meta_size - len(packet_data))
                 padded_packet = packet_data + (b'\x00' * n_bytes_to_pad)
                 yield meta, padded_packet
+                prev_meta, prev_data = meta, packet_data
 
     def write_headers(self, out_file):
         """"""
