@@ -49,7 +49,7 @@ class StitchedNeVFile(object):
                     continue
 
                 # Check if this packet is a duplicate of a previous packet right before yielding it
-                if skip_duplicates and np.all([prev_data[i] == meta[i] for i in [0, 1]]) and packet_data == prev_data:
+                if skip_duplicates and np.all([prev_meta[i] == meta[i] for i in [0, 1]]) and packet_data == prev_data:
                     continue  # Timestamp, packet type, and payload were all the same, skip this packet
 
                 # Make sure that all packets from all files are the same size
