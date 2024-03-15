@@ -50,6 +50,8 @@ def get_all_streamed_files(directory, full_paths=False):
                 if file_type not in streamed_files[nsp_id]:
                     streamed_files[nsp_id][file_type] = []
                 streamed_files[nsp_id][file_type].append(file_path)
+
+    streamed_files = {nps: files for nps, files in streamed_files.items() if files['NeV']}
     return streamed_files
 
 
