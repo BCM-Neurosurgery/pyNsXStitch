@@ -30,46 +30,50 @@ def run_stitch_async(gui):
                       '  Are you sure it has been selected correctly?\n')
             return
 
-        # Stitch the NeV files first
-        gui.notify('Stitching NeV files...')
-        gui.update_progressbar(0)
-        nev_stitch = StitchedNeVFile(gui.streamed_files['NeV'], start, end)
-        with open(gui.get_out_filepath('nev'), 'wb') as nev_out:
-            nev_stitch.write(nev_out, gui_updater=gui.update_progressbar)
-        gui.update_progressbar(100)
-        gui.notify('Stitched NeV file complete')
+        for nsp in list(gui.streamed_files.keys()):
+            gui.notify(f'Processing data from {nsp}')
+            streamed_files = gui.streamed_files[nsp]
 
-        # Stitch each of the NsX filetypes
-        gui.notify('Beginning NsX stitching...')
-        nsx_files = {filetype: files for filetype, files in gui.streamed_files.items() if 'ns' in filetype.lower()}
-        for filetype, files in nsx_files.items():
+            # Stitch the NeV files first
+            gui.notify('Stitching NeV files...')
             gui.update_progressbar(0)
-            gui.notify(f'Stitching from {len(files)} {filetype} files')
-            in_range = find_nsx_in_range(files, start, end)
-            gui.notify(f'Found {len(in_range)} files in the selected time range')
-            if in_range:
-                nsx_start = datetime.now()
-                nsx_stitch = StitchedNsXFile(in_range, start, end, aggressive_concat=gui.aggressive_stitch.get())
-                with open(gui.get_out_filepath(filetype.lower()), 'wb+') as nsx_out:
-                    nsx_stitch.write(nsx_out, gui_updater=gui.update_progressbar)
-                elapsed = (datetime.now() - nsx_start)
-                gui.notify(f'Finished stitching {filetype} files ({round(elapsed.total_seconds(), 4)} s)')
-            else:
-                gui.error('Could not find enough files to stitch!')
-                continue
+            nev_stitch = StitchedNeVFile(streamed_files['NeV'], start, end)
+            with open(gui.get_out_filepath('nev'), 'wb') as nev_out:
+                nev_stitch.write(nev_out, gui_updater=gui.update_progressbar)
+            gui.update_progressbar(100)
+            gui.notify('Stitched NeV file complete')
 
-        # Copy over all the metadata files
-        gui.notify('Copying metadata and helper files...')
-        gui.update_progressbar(0)
-        non_streamed_files = get_support_files(source_dir)
-        n_files = len(non_streamed_files)
-        for i, filename in enumerate(non_streamed_files):
-            new_name = gui.get_out_filepath(filename.split('.')[-1])
-            shutil.copy(
-                os.path.join(source_dir, filename),
-                os.path.join(output_dir, new_name)
-            )
-            gui.update_progressbar(100 * (i+1)/n_files)
+            # Stitch each of the NsX filetypes
+            gui.notify('Beginning NsX stitching...')
+            nsx_files = {filetype: files for filetype, files in streamed_files.items() if 'ns' in filetype.lower()}
+            for filetype, files in nsx_files.items():
+                gui.update_progressbar(0)
+                gui.notify(f'Stitching from {len(files)} {filetype} files')
+                in_range = find_nsx_in_range(files, start, end)
+                gui.notify(f'Found {len(in_range)} files in the selected time range')
+                if in_range:
+                    nsx_start = datetime.now()
+                    nsx_stitch = StitchedNsXFile(in_range, start, end, aggressive_concat=gui.aggressive_stitch.get())
+                    with open(gui.get_out_filepath(filetype.lower()), 'wb+') as nsx_out:
+                        nsx_stitch.write(nsx_out, gui_updater=gui.update_progressbar)
+                    elapsed = (datetime.now() - nsx_start)
+                    gui.notify(f'Finished stitching {filetype} files ({round(elapsed.total_seconds(), 4)} s)')
+                else:
+                    gui.error('Could not find enough files to stitch!')
+                    continue
+
+            # Copy over all the metadata files
+            gui.notify('Copying metadata and helper files...')
+            gui.update_progressbar(0)
+            non_streamed_files = get_support_files(source_dir)
+            n_files = len(non_streamed_files)
+            for i, filename in enumerate(non_streamed_files):
+                new_name = gui.get_out_filepath(filename.split('.')[-1])
+                shutil.copy(
+                    os.path.join(source_dir, filename),
+                    os.path.join(output_dir, new_name)
+                )
+                gui.update_progressbar(100 * (i+1)/n_files)
 
         gui.notify('Stitching complete. \n')
     except Exception as e:
@@ -84,16 +88,19 @@ def load_dir_async(gui):
         gui.update_progressbar(0)
         gui.notify(f'Loading data in: {gui.source_dir.get()}')
         gui.streamed_files = get_all_streamed_files(gui.source_dir.get(), full_paths=True)
+        first_nsp = list(gui.streamed_files.keys())[0]
+        gui.notify(f'Using comments from {first_nsp}')
+        streamed_files = gui.streamed_files[first_nsp]
         gui.update_patient_id()
-        gui.notify(f'Found {len(gui.streamed_files["NeV"])} NeV files')
+        gui.notify(f'Found {len(streamed_files["NeV"])} NeV files')
         gui.notify(f'Loading comments from NeV...')
         try:
-            raw_df = get_all_nev_comments(gui.streamed_files['NeV'], gui_updater=gui.update_progressbar)
+            raw_df = get_all_nev_comments(streamed_files['NeV'], gui_updater=gui.update_progressbar)
         except ValueError as e:
             gui.error('No comments could be loaded from the NeV files!')
             gui.full_comment_df = gui.init_comments()
         else:
-            first_nev = NevFile(gui.streamed_files['NeV'][0])
+            first_nev = NevFile(streamed_files['NeV'][0])
             gui.nev_start = get_nev_rec_start(first_nev)
             gui.ts_freq = first_nev.basic_header['TimeStampResolution']
             cleaned_df = pd.DataFrame.from_dict({
