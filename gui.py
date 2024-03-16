@@ -1,6 +1,7 @@
 import os
 import shutil
 import sys, traceback
+import time
 import warnings
 import threading
 import tkinter as tk
@@ -30,50 +31,46 @@ def run_stitch_async(gui):
                       '  Are you sure it has been selected correctly?\n')
             return
 
-        for nsp in list(gui.streamed_files.keys()):
-            gui.notify(f'Processing data from {nsp}')
-            streamed_files = gui.streamed_files[nsp]
+        # Stitch the NeV files first
+        gui.notify('Stitching NeV files...')
+        gui.update_progressbar(0)
+        nev_stitch = StitchedNeVFile(gui.streamed_files['NeV'], start, end)
+        with open(gui.get_out_filepath('nev'), 'wb') as nev_out:
+            nev_stitch.write(nev_out, gui_updater=gui.update_progressbar)
+        gui.update_progressbar(100)
+        gui.notify('Stitched NeV file complete')
 
-            # Stitch the NeV files first
-            gui.notify('Stitching NeV files...')
+        # Stitch each of the NsX filetypes
+        gui.notify('Beginning NsX stitching...')
+        nsx_files = {filetype: files for filetype, files in gui.streamed_files.items() if 'ns' in filetype.lower()}
+        for filetype, files in nsx_files.items():
             gui.update_progressbar(0)
-            nev_stitch = StitchedNeVFile(streamed_files['NeV'], start, end)
-            with open(gui.get_out_filepath('nev'), 'wb') as nev_out:
-                nev_stitch.write(nev_out, gui_updater=gui.update_progressbar)
-            gui.update_progressbar(100)
-            gui.notify('Stitched NeV file complete')
+            gui.notify(f'Stitching from {len(files)} {filetype} files')
+            in_range = find_nsx_in_range(files, start, end)
+            gui.notify(f'Found {len(in_range)} files in the selected time range')
+            if in_range:
+                nsx_start = datetime.now()
+                nsx_stitch = StitchedNsXFile(in_range, start, end, aggressive_concat=gui.aggressive_stitch.get())
+                with open(gui.get_out_filepath(filetype.lower()), 'wb+') as nsx_out:
+                    nsx_stitch.write(nsx_out, gui_updater=gui.update_progressbar)
+                elapsed = (datetime.now() - nsx_start)
+                gui.notify(f'Finished stitching {filetype} files ({round(elapsed.total_seconds(), 4)} s)')
+            else:
+                gui.error('Could not find enough files to stitch!')
+                continue
 
-            # Stitch each of the NsX filetypes
-            gui.notify('Beginning NsX stitching...')
-            nsx_files = {filetype: files for filetype, files in streamed_files.items() if 'ns' in filetype.lower()}
-            for filetype, files in nsx_files.items():
-                gui.update_progressbar(0)
-                gui.notify(f'Stitching from {len(files)} {filetype} files')
-                in_range = find_nsx_in_range(files, start, end)
-                gui.notify(f'Found {len(in_range)} files in the selected time range')
-                if in_range:
-                    nsx_start = datetime.now()
-                    nsx_stitch = StitchedNsXFile(in_range, start, end, aggressive_concat=gui.aggressive_stitch.get())
-                    with open(gui.get_out_filepath(filetype.lower()), 'wb+') as nsx_out:
-                        nsx_stitch.write(nsx_out, gui_updater=gui.update_progressbar)
-                    elapsed = (datetime.now() - nsx_start)
-                    gui.notify(f'Finished stitching {filetype} files ({round(elapsed.total_seconds(), 4)} s)')
-                else:
-                    gui.error('Could not find enough files to stitch!')
-                    continue
-
-            # Copy over all the metadata files
-            gui.notify('Copying metadata and helper files...')
-            gui.update_progressbar(0)
-            non_streamed_files = get_support_files(source_dir)
-            n_files = len(non_streamed_files)
-            for i, filename in enumerate(non_streamed_files):
-                new_name = gui.get_out_filepath(filename.split('.')[-1])
-                shutil.copy(
-                    os.path.join(source_dir, filename),
-                    os.path.join(output_dir, new_name)
-                )
-                gui.update_progressbar(100 * (i+1)/n_files)
+        # Copy over all the metadata files
+        gui.notify('Copying metadata and helper files...')
+        gui.update_progressbar(0)
+        non_streamed_files = get_support_files(source_dir)
+        n_files = len(non_streamed_files)
+        for i, filename in enumerate(non_streamed_files):
+            new_name = gui.get_out_filepath(filename.split('.')[-1])
+            shutil.copy(
+                os.path.join(source_dir, filename),
+                os.path.join(output_dir, new_name)
+            )
+            gui.update_progressbar(100 * (i+1)/n_files)
 
         gui.notify('Stitching complete. \n')
     except Exception as e:
@@ -87,20 +84,65 @@ def load_dir_async(gui):
     try:
         gui.update_progressbar(0)
         gui.notify(f'Loading data in: {gui.source_dir.get()}')
-        gui.streamed_files = get_all_streamed_files(gui.source_dir.get(), full_paths=True)
+
+        # With the new version of central, data from multiple NSPs can be in the same folder
+        all_streamed_files = get_all_streamed_files(gui.source_dir.get(), full_paths=True)
+        all_nsps = list(all_streamed_files.keys())
+        if not all_nsps:
+            gui.error('No streamed files with NSP information found!')
+            return
+        elif len(all_nsps) == 1:
+            # Only 1 NSP here, so we can move forward
+            nsp = all_nsps[0]
+            gui.streamed_files = all_streamed_files[nsp]
+        else:
+            # Found multiple NSPs, ask the user to select
+            def select(*args):
+                selected.set(True)
+                closed.set(True)
+                win.destroy()
+            def cancel(*args):
+                closed.set(True)
+                win.destroy()
+            gui.notify('Please select an NSP!')
+            win = tk.Toplevel(gui.root)
+            win.geometry("150x100")
+            win.title('NSP Select')
+            selected = tk.BooleanVar(gui.root, value=False)
+            closed = tk.BooleanVar(gui.root, value=False)
+            nsp_var = tk.StringVar(gui.root,)
+            tk.Label(master=win, text='Please select an NSP:').pack(side=tk.TOP, anchor=tk.NW)
+            tk.OptionMenu(win, nsp_var, *all_nsps).pack(side=tk.TOP)
+            buttons = tk.Frame(master=win)
+            tk.Button(master=buttons, text='Select', command=select).pack(side=tk.LEFT, anchor=tk.E)
+            tk.Button(master=buttons, text='Cancel', command=cancel).pack(side=tk.LEFT, anchor=tk.E)
+            buttons.pack(side=tk.TOP)
+            # win.mainloop()
+
+            # Wait until the little popup window has been closed
+            while not closed.get():
+                time.sleep(0.1)
+
+            if selected.get():
+                # User selected a value
+                gui.streamed_files = all_streamed_files[nsp_var.get()]
+            else:
+                # User pressed cancel
+                gui.notify('Aborting comment load...')
+                return
+
         first_nsp = list(gui.streamed_files.keys())[0]
         gui.notify(f'Using comments from {first_nsp}')
-        streamed_files = gui.streamed_files[first_nsp]
         gui.update_patient_id()
-        gui.notify(f'Found {len(streamed_files["NeV"])} NeV files')
+        gui.notify(f'Found {len(gui.streamed_files["NeV"])} NeV files')
         gui.notify(f'Loading comments from NeV...')
         try:
-            raw_df = get_all_nev_comments(streamed_files['NeV'], gui_updater=gui.update_progressbar)
+            raw_df = get_all_nev_comments(gui.streamed_files['NeV'], gui_updater=gui.update_progressbar)
         except ValueError as e:
             gui.error('No comments could be loaded from the NeV files!')
             gui.full_comment_df = gui.init_comments()
         else:
-            first_nev = NevFile(streamed_files['NeV'][0])
+            first_nev = NevFile(gui.streamed_files['NeV'][0])
             gui.nev_start = get_nev_rec_start(first_nev)
             gui.ts_freq = first_nev.basic_header['TimeStampResolution']
             cleaned_df = pd.DataFrame.from_dict({
@@ -119,7 +161,6 @@ def load_dir_async(gui):
     finally:
         gui.update_progressbar(-1)
 
-
 class StitcherGUI(object):
 
     def __init__(self):
@@ -128,7 +169,7 @@ class StitcherGUI(object):
         self.root = self.init_window()
 
         # Variables used for tracking the GUI state
-        self.source_dir = tk.StringVar(self.root, value=None)
+        self.source_dir = tk.StringVar(self.root, value=r'D:\Work\DataNet\TestData\sources\blackrock-interim\TASKTOC12032024\BothNSPsOpen_CamsOn2\20240312-143423')
         self.output_dir = tk.StringVar(self.root, value=None)
         self.search_text = tk.StringVar(self.root, value='')
         self.file_name = tk.StringVar(self.root, value='stitched')
