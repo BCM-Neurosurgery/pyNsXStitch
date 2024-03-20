@@ -38,7 +38,7 @@ def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
             # This data packet is within our interval. Return the contents
             packet_id = unpack("<H", nev_file.datafile.read(id_size))[0]
             raw_data = nev_file.datafile.read(packet_data_size - id_size)
-            if packet_type and packet_id == packet_type:
+            if packet_type is None or packet_id == packet_type:
                 yield (timestamp, packet_id), raw_data
 
 
