@@ -58,6 +58,9 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
     """
 
     # Initializations
+    sample_freq = int(nsx_file.basic_header['SampleResolution'] / nsx_file.basic_header['Period'])
+    ts_freq = nsx_file.basic_header['TimeStampResolution']
+    ts_ratio = ts_freq / sample_freq
     n_channels = nsx_file.basic_header["ChannelCount"]
     data_point_size = n_channels * DATA_BYTE_SIZE
     nsx_file.datafile.seek(0, 0)
@@ -80,8 +83,10 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
             continue  # This packet is empty
 
         # Determine whether we should read this packet from the file
-        packet_end_ts = timestamp + packet_pts
+        packet_end_ts = timestamp + int(round(packet_pts * ts_ratio))
         if read_start_ts and packet_end_ts < read_start_ts:
+            packet_size = packet_pts*data_point_size
+            nsx_file.datafile.seek(packet_size, 1)
             continue  # This entire packet is before the read start timestamp. Move to the next packet
         if read_end_ts and read_end_ts < timestamp:
             break  # This packet is past the end of the requested interval. Finish
