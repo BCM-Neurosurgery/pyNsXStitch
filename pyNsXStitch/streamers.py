@@ -1,9 +1,11 @@
 import os
 from math import ceil
 from struct import unpack
-import shutil
 import numpy as np
-from brpylib.brpylib import ELEC_ID_DEF, check_elecid, DATA_BYTE_SIZE, DATA_PAGING_SIZE
+from brpylib.brpylib import DATA_BYTE_SIZE
+
+
+DATA_PAGING_SIZE = 1024**2
 
 
 def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
