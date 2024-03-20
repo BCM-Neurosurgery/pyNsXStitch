@@ -6,7 +6,7 @@ import numpy as np
 from brpylib.brpylib import ELEC_ID_DEF, check_elecid, DATA_BYTE_SIZE, DATA_PAGING_SIZE
 
 
-def stream_nev_packets(nev_file, start_ts=0, end_ts=None):
+def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
     """
     Iterator that sequentially yields all the packets saved in the NeV files
 
@@ -38,7 +38,8 @@ def stream_nev_packets(nev_file, start_ts=0, end_ts=None):
             # This data packet is within our interval. Return the contents
             packet_id = unpack("<H", nev_file.datafile.read(id_size))[0]
             raw_data = nev_file.datafile.read(packet_data_size - id_size)
-            yield (timestamp, packet_id), raw_data
+            if packet_type and packet_id == packet_type:
+                yield (timestamp, packet_id), raw_data
 
 
 def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):

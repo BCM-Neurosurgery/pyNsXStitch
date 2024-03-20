@@ -10,10 +10,12 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 from brpylib import NevFile
+from struct import unpack
 import xml.etree.ElementTree as xml
 from pyNsXStitch.stitchers import StitchedNsXFile, StitchedNeVFile
 from pyNsXStitch.helpers import get_all_nev_comments, get_all_streamed_files, get_nev_rec_start, \
     find_nsx_in_range, get_support_files
+from pyNsXStitch.streamers import stream_nev_packets
 
 
 def run_stitch_async(gui):
@@ -135,24 +137,34 @@ def load_dir_async(gui):
         gui.notify(f'Using comments from {first_nsp}')
         gui.update_patient_id()
         gui.notify(f'Found {len(gui.streamed_files["NeV"])} NeV files')
+
+        # Iter through all the comment packets in all files
         gui.notify(f'Loading comments from NeV...')
-        try:
-            raw_df = get_all_nev_comments(gui.streamed_files['NeV'], gui_updater=gui.update_progressbar)
-        except ValueError as e:
-            gui.error('No comments could be loaded from the NeV files!')
-            gui.full_comment_df = gui.init_comments()
-        else:
-            first_nev = NevFile(gui.streamed_files['NeV'][0])
-            gui.nev_start = get_nev_rec_start(first_nev)
-            gui.ts_freq = first_nev.basic_header['TimeStampResolution']
-            cleaned_df = pd.DataFrame.from_dict({
-                'Timestamp': raw_df['TimeStamps'],
-                'Time Elapsed': np.round((raw_df['TimeStamps'] - gui.nev_start) / gui.ts_freq, 2),
-                'Comment': raw_df['Data']
-            })
-            gui.update_progressbar(100)
-            gui.full_comment_df = cleaned_df
-            gui.notify('Finished loading comments. ')
+        timestamps, comments = [], []
+        n_files = len(gui.streamed_files["NeV"])
+        for i, file in enumerate(gui.streamed_files["NeV"]):
+            nev = NevFile(file)
+            gui.update_progressbar((i+1)/n_files*100)
+            for (ts, packet_id), raw_data in stream_nev_packets(nev, packet_type=65535):
+                timestamps.append(ts)
+                text_data = raw_data[6:]
+                comment = text_data.decode('ASCII').rstrip('\x00')  # TODO: handle other charsets
+                comments.append(comment)
+        gui.update_progressbar(100)
+        gui.notify(f'Found {len(timestamps)} comments...')
+
+        # Convert to a dataframe for drawing to the GUI
+        timestamps = np.array(timestamps)
+        first_nev = NevFile(gui.streamed_files['NeV'][0])
+        gui.nev_start = get_nev_rec_start(first_nev)
+        gui.ts_freq = first_nev.basic_header['TimeStampResolution']
+        cleaned_df = pd.DataFrame.from_dict({
+            'Timestamp': timestamps,
+            'Time Elapsed': np.round((timestamps - gui.nev_start) / gui.ts_freq, 2),
+            'Comment': comments
+        })
+        gui.full_comment_df = cleaned_df
+        gui.notify('Finished loading comments. ')
         gui.reset_comments()
         gui.notify(f'Ready for time selection...\n')
         gui.update_progressbar(-1)
@@ -389,6 +401,14 @@ class StitcherGUI(object):
             row_color = ['SkyBlue1', 'SteelBlue1'][row_idx % 2]
         return row_color
 
+    def mouse_scroll(self, event):
+        shift = (event.state & 0x1) != 0
+        scroll = -1 if event.delta > 0 else 1
+        if shift:
+            self.table_area.xview_scroll(scroll, "units")
+        else:
+            self.table_area.yview_scroll(scroll, "units")
+
     def build_comment_table(self):
 
         col_widths = [100, 100, 250, 30, 30]
@@ -405,6 +425,7 @@ class StitcherGUI(object):
             width=canvas_width, height=500,
             yscrollcommand=self.scroll.set
         )
+        self.table_area.bind('<MouseWheel>', self.mouse_scroll)
 
         # Build the headers:
         for i, col in enumerate(self.comment_df.columns):
@@ -516,7 +537,7 @@ class StitcherGUI(object):
             self.comment_frame.destroy()
 
         self.comment_frame = tk.Frame(master=self.time_frame, pady=10, padx=20, height=300, borderwidth=1)
-        self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL)
+        self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL, background='white')
         self.scroll.pack(side=tk.RIGHT, fill='y')
         self.build_comment_table()
 
