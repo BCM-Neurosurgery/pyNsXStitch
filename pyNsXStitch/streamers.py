@@ -95,12 +95,13 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
 
         # Determine the altered start of the read if the start timestamp is within this packet
         start_ts = max(read_start_ts, timestamp) if read_start_ts else timestamp
-        read_start = packet_start + abs(start_ts - timestamp) * data_point_size
+        n_points_to_skip = int(np.floor(abs(start_ts - timestamp) / ts_ratio))
+        read_start = packet_start + n_points_to_skip * data_point_size
         nsx_file.datafile.seek(read_start, 0)
 
         # Determine the altered end of the read in this packet if the end timestamp is in this packet
         end_ts = min(read_end_ts, packet_end_ts) if read_end_ts else packet_end_ts
-        read_end = packet_start + abs(end_ts - timestamp) * data_point_size
+        read_end = packet_start + int(np.ceil(abs(end_ts - timestamp)/ts_ratio)) * data_point_size
 
         # Determine the number of sections that will be needed to read all the data in this packet
         read_size = read_end - read_start
@@ -128,13 +129,17 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
 
             num_pts = this_section_size // data_point_size
             shape = (int(num_pts), n_channels)
-            memory_map = np.memmap(
-                nsx_file.datafile,
-                dtype=np.int16,
-                mode="r",
-                offset=location,
-                shape=shape,
-            )
+            loc = nsx_file.datafile.tell()
+            try:
+                memory_map = np.memmap(
+                    nsx_file.datafile,
+                    dtype=np.int16,
+                    mode="r",
+                    offset=location,
+                    shape=shape,
+                )
+            except OSError as e:
+                raise e
 
             yield meta, memory_map
 
