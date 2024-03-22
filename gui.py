@@ -133,7 +133,7 @@ class StitcherGUI(object):
         self.root = self.init_window()
 
         # Variables used for tracking the GUI state
-        self.source_dir = tk.StringVar(self.root, value=None)
+        self.source_dir = tk.StringVar(self.root, value=r'D:\Work\DataNet\TestData\sources\blackrock\dual-nsp-example')
         self.output_dir = tk.StringVar(self.root, value=None)
         self.search_text = tk.StringVar(self.root, value='')
         self.file_name = tk.StringVar(self.root, value='stitched')
@@ -165,8 +165,6 @@ class StitcherGUI(object):
         # Window element sizes to keep track of
         self.left_panel_width = 30
         self.right_panel_width = 30
-        self.center_panel_width = tk.IntVar(master=self.root, value=None)
-        self.set_center_panel_width()
 
         # Build and place all the gui elements
         self.build_gui()
@@ -174,11 +172,8 @@ class StitcherGUI(object):
         # Notify the user and start the GUI
         self.notify('Stitcher GUI version 0.1')
         self.notify('Ready')
-        self.root.bind('Resize', self.update_widths)
+        # self.root.bind('Resize', self.update_widths)
         self.root.mainloop()
-
-    def set_center_panel_width(self):
-        self.center_panel_width.set(self.root.winfo_reqwidth() - (self.left_panel_width + self.right_panel_width))
 
     def init_window(self):
         root = tk.Tk()
@@ -202,35 +197,33 @@ class StitcherGUI(object):
 
     def build_gui(self):
         """Initialize all the GUI elements and arrange everything"""
-        top_row = self.build_top_row()
-        top_row.pack(side=tk.TOP, anchor=tk.W)
-        mid_row = self.build_mid_row()
-        mid_row.pack(side=tk.TOP, anchor=tk.W)
-        bot_row = self.build_bot_row()
-        bot_row.pack(side=tk.TOP, anchor=tk.W)
+
+        self.build_top_row()
+        self.build_mid_row()
+        self.build_bot_row()
+
+        # Make the center row and column expand to fit all available space
+        self.root.rowconfigure(2, weight=1)
+        self.root.columnconfigure(1, weight=1)
 
     def build_top_row(self):
-        top_row_frame = tk.Frame(master=self.root)
 
         # Build the inputs for loading the source data in
-        source_frame = tk.Frame(master=top_row_frame)
-        self.build_directory_select(source_frame, 'Source Directory', self.source_dir)
+        source_select = self.build_directory_select(self.root, 'Source Directory', self.source_dir)
+        source_select.grid(row=0, column=0, columnspan=2, sticky=tk.W)
+
+        # Build the inputs for selecting the output directory
+        out_select = self.build_directory_select(self.root, 'Output Directory', self.output_dir)
+        out_select.grid(row=1, column=0, columnspan=2, sticky=tk.W)
+
         load_btn = tk.Button(
-            master=source_frame,
+            master=self.root,
             text='Load',
             width=int(self.right_panel_width/2),
             command=self.load_dir,
             background='steelblue1'
         )
-        load_btn.pack(side=tk.LEFT)
-        source_frame.pack(side=tk.TOP, anchor=tk.W)
-
-        # Build the inputs for selecting the output directory
-        output_frame = tk.Frame(master=top_row_frame)
-        self.build_directory_select(output_frame, 'Output Directory', self.output_dir)
-        output_frame.pack(side=tk.TOP, anchor=tk.W)
-
-        return top_row_frame
+        load_btn.grid(row=0, column=2, rowspan=2, sticky=tk.E)
 
     def build_directory_select(self, parent, label, variable, ):
         """Build a little widget to select a directory on the filesystem"""
@@ -238,21 +231,21 @@ class StitcherGUI(object):
             selected = filedialog.askdirectory(initialdir="/", mustexist=True)
             variable.set(selected)
 
-        source_label = tk.Label(master=parent, text=label, width=self.left_panel_width)
+        select_frame = tk.Frame(parent)
+        source_label = tk.Label(master=select_frame, text=label, width=self.left_panel_width)
         source_label.pack(side=tk.LEFT)
-        source_in_box = tk.Entry(master=parent, textvariable=variable, width=self.center_panel_width)
-        source_in_box.pack(side=tk.LEFT)
-        browse = tk.Button(master=parent, text='Browse', width=int(self.right_panel_width/2), command=browse_cmd)
+        source_in_box = tk.Entry(master=select_frame, textvariable=variable)
+        source_in_box.pack(side=tk.LEFT, expand=True, fill=tk.X)
+        browse = tk.Button(master=select_frame, text='Browse', width=int(self.right_panel_width/2), command=browse_cmd)
         browse.pack(side=tk.LEFT, padx=5)
+        return select_frame
 
     def build_mid_row(self):
-        middle_row = tk.Frame(master=self.root, pady=20)
 
-        time_select = self.build_time_select(middle_row)
-        time_select.pack(side=tk.LEFT, anchor=tk.N,)
-        info_column = self.build_info_column(middle_row)
-        info_column.pack(side=tk.LEFT, anchor=tk.N)
-        return middle_row
+        time_select = self.build_time_select(self.root)
+        time_select.grid(row=2, column=0, sticky=tk.W)
+        info_column = self.build_info_column(self.root)
+        info_column.grid(row=2, column=2, sticky=tk.E)
 
     def update_patient_id(self):
         patient_id = '--'
@@ -267,7 +260,7 @@ class StitcherGUI(object):
         self.patient_id.set(f'Patient ID: {patient_id}')
 
     def build_info_column(self, parent):
-        info_column = tk.Frame(master=parent, height=300, width=50, highlightcolor='black')
+        info_column = tk.Frame(master=parent, highlightcolor='black')
 
         # Show the quick summary instructions
         instruction_path = os.path.join(os.path.dirname(__file__), 'GUI_quick_instructions.txt')
@@ -375,7 +368,7 @@ class StitcherGUI(object):
         col_height = 25
         y_offset = 10
         bttn_offset = 7
-        canvas_width = 6 * self.center_panel_width  # sum(col_widths)
+        canvas_width = sum(col_widths)
         canvas_height = col_height * (1+len(self.comment_df))
 
         self.table_area = tk.Canvas(
@@ -409,7 +402,7 @@ class StitcherGUI(object):
 
             for j, value in enumerate(row_data[1]):
                 text = self.comment_df.iloc[i, j]
-                self.table_area.create_text(col_starts[j], row_yloc,  text=text, width=col_widths[j], anchor=tk.NW)
+                self.table_area.create_text(col_starts[j], row_yloc,  text=text,  anchor=tk.NW)
 
             buttn_y = row_yloc + bttn_offset
             start = tk.Radiobutton(
@@ -431,7 +424,7 @@ class StitcherGUI(object):
             row_items.append(start)
             row_items.append(stop)
             self.table_elements.append(row_items)
-        self.table_area.pack(side=tk.LEFT)
+        self.table_area.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
         self.scroll.config(command=self.table_area.yview)
 
     def recolor_table(self):
@@ -495,12 +488,12 @@ class StitcherGUI(object):
             self.table_elements = []
             self.comment_frame.destroy()
 
-        self.comment_frame = tk.Frame(master=self.time_frame, pady=10, padx=20, height=300, borderwidth=1)
+        self.comment_frame = tk.Frame(master=self.root, pady=10, padx=20, borderwidth=1)
         self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL, background='white')
         self.scroll.pack(side=tk.RIGHT, fill='y')
         self.build_comment_table()
 
-        self.comment_frame.pack(side=tk.LEFT, anchor=tk.N)
+        self.comment_frame.grid(row=2, column=1, sticky=tk.NSEW)
         self.notify(f'Showing {len(self.comment_df)} matching comments')
 
     def load_dir(self):
@@ -521,19 +514,18 @@ class StitcherGUI(object):
         self.progressbar.coords(self.progress_fill, (0, 0, fill_pixels, 5))
 
     def build_bot_row(self):
-        bot_row = tk.Frame(master=self.root, padx=10, pady=10)
 
         # Build the console window
-        console_frame = tk.Frame(master=bot_row, width=110, height=10, padx=5)
-        self.console = tk .Text(master=console_frame, width=100, height=12,  state='disabled')
-        self.console.pack(side=tk.TOP, anchor=tk.NW)
-        self.progressbar = tk.Canvas(master=console_frame, width=800, height=5)
+        console_frame = tk.Frame(master=self.root, padx=5)
+        self.console = tk.Text(master=console_frame, height=10, state='disabled')
+        self.console.pack(side=tk.TOP, anchor=tk.NW, expand=True)
+        self.progressbar = tk.Canvas(master=console_frame, height=5)
         self.progress_bg = self.progressbar.create_rectangle(0, 0, 800, 5, fill='', outline='')
         self.progress_fill = self.progressbar.create_rectangle(
             0, 0, 0, 5, fill='SteelBlue1', outline=''
         )
-        self.progressbar.pack(side=tk.TOP, anchor=tk.NW)
-        console_frame.pack(side=tk.LEFT)
+        self.progressbar.pack(side=tk.TOP, anchor=tk.NW, expand=True)
+        console_frame.grid(row=3, column=0, columnspan=2, sticky=tk.NSEW)
 
         # Add formatting to the console
         self.console.tag_configure('error', foreground='red')
@@ -541,7 +533,7 @@ class StitcherGUI(object):
 
         # Add the master action buttons
         button_width = 15
-        button_frame = tk.Frame(master=bot_row, padx=10)
+        button_frame = tk.Frame(master=self.root, padx=10)
         stitch_button = tk.Button(
             button_frame,
             text='Stitch',
@@ -561,9 +553,7 @@ class StitcherGUI(object):
             width=button_width,
             pady=2)
         exit_button.pack(side=tk.TOP, pady=10)
-        button_frame.pack(side=tk.LEFT)
-
-        return bot_row
+        button_frame.grid(row=3, column=2)
 
     def write_to_console(self, message, tags=(), pad_newline=True):
         """Universal function for adding text to the log console"""
