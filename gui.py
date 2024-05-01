@@ -1,7 +1,6 @@
 import os
 import shutil
-import sys
-import traceback
+import sys, traceback
 import time
 import warnings
 import threading
@@ -45,24 +44,19 @@ def run_stitch_async(gui):
 
         # Stitch each of the NsX filetypes
         gui.notify('Beginning NsX stitching...')
-        nsx_files = {filetype: files for filetype,
-                     files in gui.streamed_files.items() if 'ns' in filetype.lower()}
+        nsx_files = {filetype: files for filetype, files in gui.streamed_files.items() if 'ns' in filetype.lower()}
         for filetype, files in nsx_files.items():
             gui.update_progressbar(0)
             gui.notify(f'Stitching from {len(files)} {filetype} files')
             in_range = find_nsx_in_range(files, start, end)
-            gui.notify(
-                f'Found {len(in_range)} files in the selected time range')
+            gui.notify(f'Found {len(in_range)} files in the selected time range')
             if in_range:
                 nsx_start = datetime.now()
-                nsx_stitch = StitchedNsXFile(
-                    in_range, start, end, aggressive_concat=gui.aggressive_stitch.get())
+                nsx_stitch = StitchedNsXFile(in_range, start, end, aggressive_concat=gui.aggressive_stitch.get())
                 with open(gui.get_out_filepath(filetype.lower()), 'wb+') as nsx_out:
-                    nsx_stitch.write(
-                        nsx_out, gui_updater=gui.update_progressbar)
+                    nsx_stitch.write(nsx_out, gui_updater=gui.update_progressbar)
                 elapsed = (datetime.now() - nsx_start)
-                gui.notify(
-                    f'Finished stitching {filetype} files ({round(elapsed.total_seconds(), 4)} s)')
+                gui.notify(f'Finished stitching {filetype} files ({round(elapsed.total_seconds(), 4)} s)')
             else:
                 gui.error('Could not find enough files to stitch!')
                 continue
@@ -85,8 +79,8 @@ def run_stitch_async(gui):
         gui.disp_error(*sys.exc_info())
     finally:
         gui.update_progressbar(-1)
-
-
+    
+    
 def load_dir_async(gui):
     """Do the work of loading the NeV files. Can be run asyncronously"""
     try:
@@ -94,8 +88,7 @@ def load_dir_async(gui):
         gui.notify(f'Loading data in: {gui.source_dir.get()}')
 
         # With the new version of central, data from multiple NSPs can be in the same folder
-        all_streamed_files = get_all_streamed_files(
-            gui.source_dir.get(), full_paths=True)
+        all_streamed_files = get_all_streamed_files(gui.source_dir.get(), full_paths=True)
         all_nsps = list(all_streamed_files.keys())
         if not all_nsps:
             gui.error('No streamed files with NSP information found!')
@@ -110,7 +103,6 @@ def load_dir_async(gui):
                 selected.set(True)
                 closed.set(True)
                 win.destroy()
-
             def cancel(*args):
                 closed.set(True)
                 win.destroy()
@@ -121,14 +113,11 @@ def load_dir_async(gui):
             selected = tk.BooleanVar(gui.root, value=False)
             closed = tk.BooleanVar(gui.root, value=False)
             nsp_var = tk.StringVar(gui.root,)
-            tk.Label(master=win, text='Please select an NSP:').pack(
-                side=tk.TOP, anchor=tk.NW)
+            tk.Label(master=win, text='Please select an NSP:').pack(side=tk.TOP, anchor=tk.NW)
             tk.OptionMenu(win, nsp_var, *all_nsps).pack(side=tk.TOP)
             buttons = tk.Frame(master=win)
-            tk.Button(master=buttons, text='Select', command=select).pack(
-                side=tk.LEFT, anchor=tk.E)
-            tk.Button(master=buttons, text='Cancel', command=cancel).pack(
-                side=tk.LEFT, anchor=tk.E)
+            tk.Button(master=buttons, text='Select', command=select).pack(side=tk.LEFT, anchor=tk.E)
+            tk.Button(master=buttons, text='Cancel', command=cancel).pack(side=tk.LEFT, anchor=tk.E)
             buttons.pack(side=tk.TOP)
             # win.mainloop()
 
@@ -159,10 +148,9 @@ def load_dir_async(gui):
             for (ts, packet_id), raw_data in stream_nev_packets(nev, packet_type=65535):
                 timestamps.append(ts)
                 text_data = raw_data[6:]
-                comment = text_data.decode('ASCII').rstrip(
-                    '\x00')  # TODO: handle other charsets
+                comment = text_data.decode('ASCII').rstrip('\x00')  # TODO: handle other charsets
                 comments.append(comment)
-                file_names.append(os.path.basename(file))  # store file name
+                file_names.append(os.path.basename(file)) # store file name
         gui.update_progressbar(100)
         gui.notify(f'Found {len(timestamps)} comments...')
 
@@ -248,7 +236,7 @@ class StitcherGUI(object):
     def init_comments():
         """Initialize an empty comment dataframe with just headers"""
         return pd.DataFrame.from_dict({
-            'Timestamp': [], 'TimeElapsed': [], 'Comment': []
+            'Timestamp': [], 'TimeElapsed': [], 'Comment': [], 'File Name': []
         })
 
     def build_gui(self):
@@ -265,8 +253,7 @@ class StitcherGUI(object):
 
         # Build the inputs for loading the source data in
         source_frame = tk.Frame(master=top_row_frame)
-        self.build_directory_select(
-            source_frame, 'Source Directory', self.source_dir)
+        self.build_directory_select(source_frame, 'Source Directory', self.source_dir)
         load_btn = tk.Button(
             master=source_frame,
             text='Load',
@@ -279,8 +266,7 @@ class StitcherGUI(object):
 
         # Build the inputs for selecting the output directory
         output_frame = tk.Frame(master=top_row_frame)
-        self.build_directory_select(
-            output_frame, 'Output Directory', self.output_dir)
+        self.build_directory_select(output_frame, 'Output Directory', self.output_dir)
         output_frame.pack(side=tk.TOP, anchor=tk.W)
 
         return top_row_frame
@@ -294,11 +280,9 @@ class StitcherGUI(object):
 
         source_label = tk.Label(master=parent, text=label, width=label_width)
         source_label.pack(side=tk.LEFT)
-        source_in_box = tk.Entry(
-            master=parent, textvariable=variable, width=box_width)
+        source_in_box = tk.Entry(master=parent, textvariable=variable, width=box_width)
         source_in_box.pack(side=tk.LEFT)
-        browse = tk.Button(master=parent, text='Browse',
-                           width=button_width, command=browse_cmd)
+        browse = tk.Button(master=parent, text='Browse', width=button_width, command=browse_cmd)
         browse.pack(side=tk.LEFT)
 
     def build_mid_row(self):
@@ -313,10 +297,8 @@ class StitcherGUI(object):
     def update_patient_id(self):
         patient_id = '--'
         if self.source_dir.get():
-            sif_files = [f for f in os.listdir(
-                self.source_dir.get()) if f.endswith('.sif')]
-            sif_data = xml.parse(os.path.join(
-                self.source_dir.get(), sif_files[0]))
+            sif_files = [f for f in os.listdir(self.source_dir.get()) if f.endswith('.sif')]
+            sif_data = xml.parse(os.path.join(self.source_dir.get(), sif_files[0]))
             patient = sif_data.getroot().findall('Patient/Id')[0].text
             if patient is None:
                 patient_id = 'Unavailable'
@@ -325,21 +307,17 @@ class StitcherGUI(object):
         self.patient_id.set(f'Patient ID: {patient_id}')
 
     def build_info_column(self, parent):
-        info_column = tk.Frame(master=parent, height=300,
-                               width=50, highlightcolor='black')
+        info_column = tk.Frame(master=parent, height=300, width=50, highlightcolor='black')
 
         # Show the quick summary instructions
-        instruction_path = os.path.join(os.path.dirname(
-            __file__), 'GUI_quick_instructions.txt')
+        instruction_path = os.path.join(os.path.dirname(__file__), 'GUI_quick_instructions.txt')
         with open(instruction_path, 'r') as f:
             instructions = f.read()
-        how_to_label = tk.Label(
-            info_column, text=instructions, justify=tk.LEFT)
+        how_to_label = tk.Label(info_column, text=instructions, justify=tk.LEFT)
         how_to_label.pack(side=tk.TOP, anchor=tk.W)
 
         # Show data about the selected patient
-        tk.Label(info_column, textvariable=self.patient_id,
-                 justify=tk.LEFT).pack(side=tk.TOP, anchor=tk.W)
+        tk.Label(info_column, textvariable=self.patient_id, justify=tk.LEFT).pack(side=tk.TOP, anchor=tk.W)
         self.update_patient_id()
         pass
 
@@ -351,42 +329,31 @@ class StitcherGUI(object):
 
         # Build all the controls on the left side of the time select frame
         inputs = tk.Frame(master=self.time_frame, width=50, padx=10)
-        tk.Label(master=inputs, text="Comment Search", ).pack(
-            side=tk.TOP, anchor=tk.W, pady=(20, 0))
+        tk.Label(master=inputs, text="Comment Search", ).pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
         tk.Entry(master=inputs, textvariable=self.search_text).pack(side=tk.TOP)
         buttons = tk.Frame(master=inputs)
-        tk.Button(master=buttons, text='Search', command=self.search_comments).pack(
-            side=tk.RIGHT, anchor=tk.N)
-        tk.Button(master=buttons, text='Reset', command=self.reset_comments).pack(
-            side=tk.RIGHT, anchor=tk.N)
+        tk.Button(master=buttons, text='Search', command=self.search_comments).pack(side=tk.RIGHT, anchor=tk.N)
+        tk.Button(master=buttons, text='Reset', command=self.reset_comments).pack(side=tk.RIGHT, anchor=tk.N)
         buttons.pack(side=tk.TOP, anchor=tk.E)
 
-        tk.Label(master=inputs, text="Start Time").pack(
-            side=tk.TOP, anchor=tk.W, pady=(20, 0))
+        tk.Label(master=inputs, text="Start Time").pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
         tk.Entry(master=inputs, textvariable=self.start_time).pack(side=tk.TOP)
         tk.Label(master=inputs, text="End Time").pack(side=tk.TOP, anchor=tk.W)
         tk.Entry(master=inputs, textvariable=self.end_time).pack(side=tk.TOP)
         buttons = tk.Frame(master=inputs)
-        tk.Button(master=buttons, text='Update', command=self.update_tlims).pack(
-            side=tk.RIGHT, anchor=tk.N)
-        tk.Button(master=buttons, text='Reset', command=self.reset_tlims).pack(
-            side=tk.RIGHT, anchor=tk.N)
+        tk.Button(master=buttons, text='Update', command=self.update_tlims).pack(side=tk.RIGHT, anchor=tk.N)
+        tk.Button(master=buttons, text='Reset', command=self.reset_tlims).pack(side=tk.RIGHT, anchor=tk.N)
         buttons.pack(side=tk.TOP, anchor=tk.E)
 
-        tk.Label(master=inputs, text="Output Name").pack(
-            side=tk.TOP, anchor=tk.W, pady=(20, 0))
+        tk.Label(master=inputs, text="Output Name").pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
         tk.Entry(master=inputs, textvariable=self.file_name).pack(side=tk.TOP)
         buttons = tk.Frame(master=inputs)
-        tk.Button(master=buttons, text='Remember', command=self.set_name).pack(
-            side=tk.RIGHT, anchor=tk.N)
-        tk.Button(master=buttons, text='Reset', command=self.reset_name).pack(
-            side=tk.RIGHT, anchor=tk.N)
+        tk.Button(master=buttons, text='Remember', command=self.set_name).pack(side=tk.RIGHT, anchor=tk.N)
+        tk.Button(master=buttons, text='Reset', command=self.reset_name).pack(side=tk.RIGHT, anchor=tk.N)
         buttons.pack(side=tk.TOP, anchor=tk.E)
 
-        tk.Label(master=inputs, text="More Options").pack(
-            side=tk.TOP, anchor=tk.W, pady=(20, 0))
-        stitch = tk.Checkbutton(
-            master=inputs, text='Aggressive Stitch', variable=self.aggressive_stitch)
+        tk.Label(master=inputs, text="More Options").pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
+        stitch = tk.Checkbutton(master=inputs, text='Aggressive Stitch', variable=self.aggressive_stitch)
         stitch.pack(side=tk.TOP, anchor=tk.E)
 
         inputs.pack(side=tk.LEFT, anchor=tk.N)
@@ -445,22 +412,17 @@ class StitcherGUI(object):
             self.table_area.yview_scroll(scroll, "units")
 
     def build_comment_table(self):
+        # col_widths = [100, 100, 250, 30, 30, 200]
+        # col_starts = [10, 110, 210, 460, 490, 520]
+
+        col_widths = [100, 100, 250, 200, 30, 30]
+        col_starts = [10, 110, 210, 460, 660, 690]
+
         col_height = 25
         y_offset = 10
         bttn_offset = 7
-
-        # Calculate width of comment column to fit in longest comment
-        if not self.comment_df.empty:
-            max_comment_width = max(self.comment_df['Comment'].apply(len))
-            comment_width = max(250, max_comment_width * 8)
-        else:
-            comment_width = 250  # Set a default width when comment_df is empty
-
-        col_widths = [100, 100, comment_width, 60, 200]
-        col_starts = [10, 110, 210, 210 + comment_width,
-                      270 + comment_width]
         canvas_width = sum(col_widths)
-        canvas_height = col_height * (1 + len(self.comment_df))
+        canvas_height = col_height * (1+len(self.comment_df))
 
         self.table_area = tk.Canvas(
             self.comment_frame,
@@ -471,19 +433,13 @@ class StitcherGUI(object):
         self.table_area.bind('<MouseWheel>', self.mouse_scroll)
 
         # Build the headers:
-        # Display only the first 3 columns
-        for i, col in enumerate(self.comment_df.columns[:3]):
-            self.table_area.create_text(
-                col_starts[i], y_offset, text=col, width=col_widths[i], anchor=tk.NW)
+        for i, col in enumerate(self.comment_df.columns):
+            self.table_area.create_text(col_starts[i], y_offset,  text=col, width=col_widths[i], anchor=tk.NW)
+        
         self.table_area.create_text(
-            col_starts[3], y_offset,
+            col_starts[4]-15, y_offset,
             text=r'Start\Stop',
-            width=col_widths[3],
-            anchor=tk.NW)
-        self.table_area.create_text(
-            col_starts[4], y_offset,
-            text='File Name',
-            width=col_widths[4],
+            width=sum(col_widths[4:]),
             anchor=tk.NW)
 
         # For each entry in the comments table, add an entry, and build the appropriate selectors
@@ -491,18 +447,16 @@ class StitcherGUI(object):
             row_items = []
             row_ts = row_data[1]['Timestamp']
             row_color = self.get_row_color(i, row_ts)
-            row_yloc = y_offset + col_height * (1 + i)
+            row_yloc = y_offset + col_height * (1+i)
 
-            bg_rectangle = self.table_area.create_rectangle(
-                0, row_yloc - 5, canvas_width, row_yloc + col_height - 5, fill=row_color, outline=''
+            bg_rectange = self.table_area.create_rectangle(
+                0, row_yloc-5, canvas_width, row_yloc+col_height-5, fill=row_color, outline=''
             )
-            row_items.append(bg_rectangle)
+            row_items.append(bg_rectange)
 
-            # Display only the first 3 columns
-            for j, value in enumerate(row_data[1][:3]):
+            for j, value in enumerate(row_data[1]):
                 text = self.comment_df.iloc[i, j]
-                self.table_area.create_text(
-                    col_starts[j], row_yloc, text=text, width=col_widths[j], anchor=tk.NW)
+                self.table_area.create_text(col_starts[j], row_yloc, text=text, width=col_widths[j], anchor=tk.NW)
 
             buttn_y = row_yloc + bttn_offset
             start = tk.Radiobutton(
@@ -512,9 +466,7 @@ class StitcherGUI(object):
                 command=self.update_ts_lims,
                 background=row_color
             )
-            # Adjusted start button position
-            self.table_area.create_window(
-                col_starts[3] + 10, buttn_y, window=start)
+            self.table_area.create_window(col_starts[4], buttn_y, window=start)
             stop = tk.Radiobutton(
                 self.table_area,
                 variable=self.end_timestamp,
@@ -522,19 +474,12 @@ class StitcherGUI(object):
                 command=self.update_ts_lims,
                 background=row_color
             )
-            # Adjusted stop button position
-            self.table_area.create_window(
-                col_starts[3] + 40, buttn_y, window=stop)
+            self.table_area.create_window(col_starts[5], buttn_y, window=stop)
             row_items.append(start)
             row_items.append(stop)
-
-            # Get file name
-            file_name = self.comment_df.iloc[i, 3]
-            self.table_area.create_text(
-                col_starts[4], row_yloc, text=file_name, width=col_widths[4], anchor=tk.NW)
-
-            self.table_elements.append(row_items)
             
+            self.table_elements.append(row_items)
+
         self.table_area.pack(side=tk.LEFT)
         self.scroll.config(command=self.table_area.yview)
 
@@ -553,8 +498,7 @@ class StitcherGUI(object):
 
     def update_ts_lims(self):
         """Update the displayed values in the time range entry based on comment selection"""
-        ts_lims = np.array(
-            [self.start_timestamp.get(), self.end_timestamp.get()])
+        ts_lims = np.array([self.start_timestamp.get(), self.end_timestamp.get()])
         time_lims = (ts_lims - self.nev_start) / self.ts_freq
         self.start_time.set(np.round(time_lims[0], 4))
         self.end_time.set(np.round(time_lims[1], 4))
@@ -600,10 +544,8 @@ class StitcherGUI(object):
             self.table_elements = []
             self.comment_frame.destroy()
 
-        self.comment_frame = tk.Frame(
-            master=self.time_frame, pady=10, padx=20, height=300, borderwidth=1)
-        self.scroll = tk.Scrollbar(
-            self.comment_frame, orient=tk.VERTICAL, background='white')
+        self.comment_frame = tk.Frame(master=self.time_frame, pady=10, padx=20, height=300, borderwidth=1)
+        self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL, background='white')
         self.scroll.pack(side=tk.RIGHT, fill='y')
         self.build_comment_table()
 
@@ -612,8 +554,7 @@ class StitcherGUI(object):
 
     def load_dir(self):
         """Load all the NeV comments into memory, trigger populating the comment frame"""
-        thd = threading.Thread(target=load_dir_async,
-                               args=(self,))  # timer thread
+        thd = threading.Thread(target=load_dir_async, args=(self,))  # timer thread
         thd.daemon = True
         thd.start()
 
@@ -623,8 +564,7 @@ class StitcherGUI(object):
         if progress < 0:  # Switch to passive not running anything mode
             self.progressbar.itemconfigure(self.progress_bg, fill='')
             fill_pixels = 0
-        # Switch to active running a task mode (fully visible progressbar)
-        else:
+        else:  # Switch to active running a task mode (fully visible progressbar)
             self.progressbar.itemconfigure(self.progress_bg, fill='White')
             fill_pixels = round(full_width * progress / 100)
         self.progressbar.coords(self.progress_fill, (0, 0, fill_pixels, 5))
@@ -634,12 +574,10 @@ class StitcherGUI(object):
 
         # Build the console window
         console_frame = tk.Frame(master=bot_row, width=110, height=10, padx=5)
-        self.console = tk .Text(master=console_frame,
-                                width=100, height=12,  state='disabled')
+        self.console = tk .Text(master=console_frame, width=100, height=12,  state='disabled')
         self.console.pack(side=tk.TOP, anchor=tk.NW)
         self.progressbar = tk.Canvas(master=console_frame, width=800, height=5)
-        self.progress_bg = self.progressbar.create_rectangle(
-            0, 0, 800, 5, fill='', outline='')
+        self.progress_bg = self.progressbar.create_rectangle(0, 0, 800, 5, fill='', outline='')
         self.progress_fill = self.progressbar.create_rectangle(
             0, 0, 0, 5, fill='SteelBlue1', outline=''
         )
@@ -662,8 +600,7 @@ class StitcherGUI(object):
             pady=2,
         )
         stitch_button.pack(side=tk.TOP, pady=10)
-        reset_button = tk.Button(
-            button_frame, text='Reset', command=self.full_reset, width=button_width, pady=2)
+        reset_button = tk.Button(button_frame, text='Reset', command=self.full_reset, width=button_width, pady=2)
         reset_button.pack(side=tk.TOP, pady=10)
         exit_button = tk.Button(
             button_frame,
@@ -717,8 +654,7 @@ class StitcherGUI(object):
         return path
 
     def do_stitch(self):
-        thd = threading.Thread(target=run_stitch_async,
-                               args=(self,))  # timer thread
+        thd = threading.Thread(target=run_stitch_async, args=(self,))  # timer thread
         thd.daemon = True
         thd.start()
 
