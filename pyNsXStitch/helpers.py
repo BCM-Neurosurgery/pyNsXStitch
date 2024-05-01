@@ -104,23 +104,30 @@ def get_nsx_start_timestamp(nsx_filepath):
 
 
 def find_nsx_in_range(nsx_filepaths, start_ts, end_ts, subtract_offset=False):
-    """Find all nsx files that contain data in the given range (time elapsed in seconds)"""
-    in_range = False
-    files = []
-    for nsx_fp in nsx_filepaths:
-        file_start = get_nsx_start_timestamp(nsx_fp)
-        file_end = get_nsx_end_timestamp(nsx_fp)
-        if file_start <= start_ts < file_end:
-            in_range = True
-        elif end_ts <= file_end:
-            # We've found the end of the range, we can quit looping (but still include this file)
-            files.append(nsx_fp)
-            break
+        """Find all nsx files that contain data in the given range (time elapsed in seconds)"""
+        in_range = False
+        files = []
+        Ts_all = []
 
-        if in_range:
-            files.append(nsx_fp)
+        for nsx_fp in nsx_filepaths:
+            file_start = get_nsx_start_timestamp(nsx_fp)
+            Ts_all.append(file_start) # collect starting timestamps of all ns5 files
+    
+        for nsx_fp in [x for _,x in sorted(zip(Ts_all,nsx_filepaths))]: # sort file paths by starting time stamp & loop
+            file_start = get_nsx_start_timestamp(nsx_fp)
+            file_end = get_nsx_end_timestamp(nsx_fp)
 
-    return files
+            if file_start <= start_ts < file_end:
+                in_range = True
+            elif end_ts <= file_end:
+                # We've found the end of the range, we can quit looping (but still include this file)
+                files.append(nsx_fp)
+                break
+
+            if in_range:
+                files.append(nsx_fp)
+
+        return files
 
 
 def get_time_in_file(nsx_file, timestamp):
