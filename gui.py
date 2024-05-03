@@ -378,9 +378,11 @@ class StitcherGUI(object):
         found_name = 'stitched'
         for idx, row in self.full_comment_df.iterrows():
             row_ts = row['Timestamp']
+            print([idx, row_ts, self.end_timestamp.get()])
             if row_ts > self.end_timestamp.get():
-                self.warn('No valid TASKID comment found in the time range')
-                break  # We're out of the search interval w/o finding a $TASKID. Finish searching
+                continue # We're beyond the search interval, move to next comment
+            #     self.warn('No valid TASKID comment found in the time range')
+            #     break  # We're out of the search interval w/o finding a $TASKID. Finish searching
             if row_ts < self.start_timestamp.get():
                 continue  # We're before the search interval, move to next comment
             if row['Comment'].startswith('$TASKID'):
