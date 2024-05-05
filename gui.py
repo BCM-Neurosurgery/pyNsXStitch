@@ -151,7 +151,7 @@ def load_dir_async(gui):
                 comments.append(comment)
                 file_names.append(os.path.basename(file))  # store file name
         gui.update_progressbar(100)
-        gui.notify(f'Found {len(timestamps)} comments...')
+        gui.notify(f'Found {len(timestamps)} comments')
 
         # Convert to a dataframe for drawing to the GUI
         timestamps = np.array(timestamps)
@@ -165,7 +165,7 @@ def load_dir_async(gui):
             'File Name': file_names
         })
         gui.full_comment_df = cleaned_df
-        gui.notify('Finished loading comments. ')
+        gui.notify('Loading comments to this window... ')
         gui.reset_comments()
         gui.notify(f'Ready for time selection...\n')
         gui.update_progressbar(-1)
@@ -219,12 +219,8 @@ class StitcherGUI(object):
 
     def init_window(self):
         root = tk.Tk()
-        try:
-            root.attributes('-zoomed', True)
-        except tk.TclError:
-            root.state('zoomed')
         root.title('Manual Time Alignment')
-        root.geometry("500x500")
+        root.geometry("1200x800")
         tk.Tk.report_callback_exception = self.disp_error
         warnings.showwarning = self.show_warning
         return root
@@ -237,60 +233,69 @@ class StitcherGUI(object):
         })
 
     def build_gui(self):
-        """Initialize all the GUI elements and arrange everything"""
-        top_row = self.build_top_row()
-        top_row.pack(side=tk.TOP, anchor=tk.W, pady=20)
-        mid_row = self.build_mid_row()
-        mid_row.pack(side=tk.TOP, anchor=tk.W, pady=20)
-        bot_row = self.build_bot_row()
-        bot_row.pack(side=tk.TOP, anchor=tk.W)
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
 
-    def build_top_row(self):
-        top_row_frame = tk.Frame(master=self.root)
+        main_frame = tk.Frame(self.root)
+        main_frame.grid(row=0, column=0, sticky='nsew')
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(1, weight=1)
 
-        # Build the inputs for loading the source data in
-        source_frame = tk.Frame(master=top_row_frame)
+        top_row = self.build_top_row(main_frame)
+        top_row.grid(row=0, column=0, padx=10, pady=10, sticky='ew')
+
+        mid_row = self.build_mid_row(main_frame)
+        mid_row.grid(row=1, column=0, padx=10, pady=10, sticky='nsew')
+
+        bot_row = self.build_bot_row(main_frame)
+        bot_row.grid(row=2, column=0, padx=10, pady=10, sticky='ew')
+        
+    def build_top_row(self, parent):
+        top_row_frame = tk.Frame(parent)
+        top_row_frame.columnconfigure(0, weight=1)
+        top_row_frame.columnconfigure(1, weight=0)
+
+        source_frame = tk.Frame(top_row_frame)
         self.build_directory_select(source_frame, 'Source Directory', self.source_dir)
-        load_btn = tk.Button(
-            master=source_frame,
-            text='Load',
-            width=20,
-            command=self.load_dir,
-            background='steelblue1'
-        )
-        load_btn.pack(side=tk.LEFT)
-        source_frame.pack(side=tk.TOP, anchor=tk.W)
+        source_frame.grid(row=0, column=0, padx=5, sticky='ew')
 
-        # Build the inputs for selecting the output directory
-        output_frame = tk.Frame(master=top_row_frame)
+        output_frame = tk.Frame(top_row_frame)
         self.build_directory_select(output_frame, 'Output Directory', self.output_dir)
-        output_frame.pack(side=tk.TOP, anchor=tk.W)
+        output_frame.grid(row=1, column=0, padx=5, sticky='ew')
+
+        load_btn = tk.Button(top_row_frame, text='Load', command=self.load_dir, background='Steelblue1')
+        load_btn.grid(row=0, column=1, pady=5)
 
         return top_row_frame
 
     @staticmethod
-    def build_directory_select(parent, label, variable, label_width=20, button_width=15, box_width=100):
-        """Build a little widget to select a directory on the filesystem"""
-        def browse_cmd():
-            selected = filedialog.askdirectory(initialdir="/", mustexist=True)
-            variable.set(selected)
+    def build_directory_select(parent, label, variable):
+        parent.columnconfigure(1, weight=1)
 
-        source_label = tk.Label(master=parent, text=label, width=label_width)
-        source_label.pack(side=tk.LEFT)
-        source_in_box = tk.Entry(master=parent, textvariable=variable, width=box_width)
-        source_in_box.pack(side=tk.LEFT)
-        browse = tk.Button(master=parent, text='Browse', width=button_width, command=browse_cmd)
-        browse.pack(side=tk.LEFT)
+        label = tk.Label(parent, text=label)
+        label.grid(row=0, column=0, padx=5, sticky='w')
 
-    def build_mid_row(self):
-        middle_row = tk.PanedWindow(master=self.root, orient=tk.HORIZONTAL, sashwidth=10, sashrelief=tk.RAISED)
+        entry = tk.Entry(parent, textvariable=variable)
+        entry.grid(row=0, column=1, padx=5, sticky='ew')
 
-        time_select = self.build_time_select(middle_row)
-        middle_row.add(time_select, width=1200, minsize=600)
-        info_column = self.build_info_column(middle_row)
-        middle_row.add(info_column, width=200, minsize=200, sticky=tk.NE)
+        browse_btn = tk.Button(parent, text='Browse', command=lambda: variable.set(filedialog.askdirectory()))
+        browse_btn.grid(row=0, column=2, padx=5)
 
-        return middle_row
+    def build_mid_row(self, parent):
+        mid_row_frame = tk.Frame(parent)
+        mid_row_frame.columnconfigure(0, weight=1)
+        mid_row_frame.rowconfigure(0, weight=1)
+
+        paned_window = tk.PanedWindow(mid_row_frame, orient=tk.HORIZONTAL, sashwidth=10, sashrelief=tk.RAISED)
+        paned_window.grid(row=0, column=0, sticky='nsew')
+
+        time_select = self.build_time_select(paned_window)
+        paned_window.add(time_select, minsize=800)
+
+        info_column = self.build_info_column(paned_window)
+        paned_window.add(info_column, minsize=200)
+
+        return mid_row_frame
 
     def update_patient_id(self):
         patient_id = '--'
@@ -305,55 +310,60 @@ class StitcherGUI(object):
         self.patient_id.set(f'Patient ID: {patient_id}')
 
     def build_info_column(self, parent):
-        info_column = tk.Frame(master=parent, height=300, width=50, highlightcolor='black')
+        info_column = tk.Frame(parent)
 
         # Show the quick summary instructions
         instruction_path = os.path.join(os.path.dirname(__file__), 'GUI_quick_instructions.txt')
         with open(instruction_path, 'r') as f:
             instructions = f.read()
         how_to_label = tk.Label(info_column, text=instructions, justify=tk.LEFT)
-        how_to_label.pack(side=tk.TOP, anchor=tk.W)
+        how_to_label.grid(row=0, column=0, padx=5, pady=5, sticky='ew')
 
         # Show data about the selected patient
-        tk.Label(info_column, textvariable=self.patient_id, justify=tk.LEFT).pack(side=tk.TOP, anchor=tk.W)
+        tk.Label(info_column, textvariable=self.patient_id, justify=tk.LEFT).grid(row=1, column=0, padx=5, pady=5, sticky='ew')
         self.update_patient_id()
 
         return info_column
 
     def build_time_select(self, parent):
-        """Build the section of the GUI that helps with selecting the time limits of the NsX Stitching"""
-        self.time_frame = tk.Frame(master=parent)
+        self.time_frame = tk.Frame(parent)
+        self.time_frame.columnconfigure(0, weight=0)
+        self.time_frame.columnconfigure(1, weight=1)
+        self.time_frame.rowconfigure(0, weight=1)
 
-        # Build all the controls on the left side of the time select frame
-        inputs = tk.Frame(master=self.time_frame, width=50, padx=10)
-        tk.Label(master=inputs, text="Comment Search", ).pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
-        tk.Entry(master=inputs, textvariable=self.search_text).pack(side=tk.TOP)
-        buttons = tk.Frame(master=inputs)
-        tk.Button(master=buttons, text='Search', command=self.search_comments).pack(side=tk.RIGHT, anchor=tk.N)
-        tk.Button(master=buttons, text='Reset', command=self.reset_comments).pack(side=tk.RIGHT, anchor=tk.N)
-        buttons.pack(side=tk.TOP, anchor=tk.E)
+        inputs = tk.Frame(self.time_frame)
 
-        tk.Label(master=inputs, text="Start Time").pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
-        tk.Entry(master=inputs, textvariable=self.start_time).pack(side=tk.TOP)
-        tk.Label(master=inputs, text="End Time").pack(side=tk.TOP, anchor=tk.W)
-        tk.Entry(master=inputs, textvariable=self.end_time).pack(side=tk.TOP)
-        buttons = tk.Frame(master=inputs)
-        tk.Button(master=buttons, text='Update', command=self.update_tlims).pack(side=tk.RIGHT, anchor=tk.N)
-        tk.Button(master=buttons, text='Reset', command=self.reset_tlims).pack(side=tk.RIGHT, anchor=tk.N)
-        buttons.pack(side=tk.TOP, anchor=tk.E)
+        tk.Label(inputs, text="Comment Search").grid(row=0, column=0, padx=5, sticky='w')
+        tk.Entry(inputs, textvariable=self.search_text).grid(row=1, column=0, padx=5, sticky='ew')
 
-        tk.Label(master=inputs, text="Output Name").pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
-        tk.Entry(master=inputs, textvariable=self.file_name).pack(side=tk.TOP)
-        buttons = tk.Frame(master=inputs)
-        tk.Button(master=buttons, text='Remember', command=self.set_name).pack(side=tk.RIGHT, anchor=tk.N)
-        tk.Button(master=buttons, text='Reset', command=self.reset_name).pack(side=tk.RIGHT, anchor=tk.N)
-        buttons.pack(side=tk.TOP, anchor=tk.E)
+        buttons = tk.Frame(inputs)
+        tk.Button(buttons, text='Search', command=self.search_comments).pack(side=tk.RIGHT)
+        tk.Button(buttons, text='Reset', command=self.reset_comments).pack(side=tk.RIGHT)
+        buttons.grid(row=3, column=0, padx=5, sticky='w', pady=(0, 10)) # add padding to bottom only
 
-        tk.Label(master=inputs, text="More Options").pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
-        stitch = tk.Checkbutton(master=inputs, text='Aggressive Stitch', variable=self.aggressive_stitch)
-        stitch.pack(side=tk.TOP, anchor=tk.E)
+        tk.Label(inputs, text="Start Time").grid(row=4, column=0, padx=5, sticky='w')
+        tk.Entry(inputs, textvariable=self.start_time).grid(row=5, column=0, padx=5, sticky='ew')
 
-        inputs.pack(side=tk.LEFT, anchor=tk.N)
+        tk.Label(inputs, text="End Time").grid(row=6, column=0, padx=5, sticky='w')
+        tk.Entry(inputs, textvariable=self.end_time).grid(row=7, column=0, padx=5, sticky='ew')
+
+        buttons = tk.Frame(inputs)
+        tk.Button(buttons, text='Update', command=self.update_tlims).pack(side=tk.RIGHT)
+        tk.Button(buttons, text='Reset', command=self.reset_tlims).pack(side=tk.RIGHT)
+        buttons.grid(row=8, column=0, padx=5, sticky='w', pady=(0, 10))
+
+        tk.Label(inputs, text="Output Name").grid(row=9, column=0, padx=5, sticky='w')
+        tk.Entry(inputs, textvariable=self.file_name).grid(row=10, column=0, padx=5, sticky='ew')
+
+        buttons = tk.Frame(inputs)
+        tk.Button(buttons, text='Remember', command=self.set_name).pack(side=tk.RIGHT)
+        tk.Button(buttons, text='Reset', command=self.reset_name).pack(side=tk.RIGHT)
+        buttons.grid(row=11, column=0, padx=5, sticky='w', pady=(0, 10))
+
+        tk.Label(inputs, text="More Options").grid(row=12, column=0, padx=5, sticky='w')
+        tk.Checkbutton(inputs, text='Aggressive Stitch', variable=self.aggressive_stitch).grid(row=13, column=0, padx=5, sticky='w')
+
+        inputs.grid(row=0, column=0, padx=5, pady=5, sticky='nw')
 
         self.reset_comments()
 
@@ -404,23 +414,27 @@ class StitcherGUI(object):
         if self.comment_frame:
             self.comment_frame.destroy()
 
-        self.comment_frame = tk.Frame(master=self.time_frame)
-        self.comment_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.comment_frame = tk.Frame(self.time_frame)
+        self.comment_frame.grid(row=0, column=1, sticky='nsew')
+        # self.time_frame.rowconfigure(1, weight=1)
+        # self.time_frame.columnconfigure(0, weight=1)
 
-        self.comment_table = ttk.Treeview(master=self.comment_frame, columns=list(self.comment_df.columns), show='headings')
+        self.comment_table = ttk.Treeview(self.comment_frame, columns=list(self.comment_df.columns), show='headings')
         for col in self.comment_df.columns:
             self.comment_table.heading(col, text=col)
-            self.comment_table.column(col, width=100, stretch=True)
+            self.comment_table.column(col, stretch=True)
 
-        self.comment_table.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.comment_table.grid(row=0, column=0, sticky='nsew')
+        self.comment_frame.rowconfigure(0, weight=1)
+        self.comment_frame.columnconfigure(0, weight=1)
 
         scrollbar = ttk.Scrollbar(self.comment_frame, orient=tk.VERTICAL, command=self.comment_table.yview)
-        self.comment_table.configure(yscroll=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.comment_table.configure(yscrollcommand=scrollbar.set)
+        scrollbar.grid(row=0, column=1, sticky='ns')
 
         for idx, row in self.comment_df.iterrows():
             values = [row[col] for col in self.comment_df.columns]
-            self.comment_table.insert('', 'end', values=values, tags=(self.get_row_color(row['Timestamp'])))
+            self.comment_table.insert('', 'end', values=values, tags=(self.get_row_color(row['Timestamp']),))
 
         self.comment_table.tag_configure('palegreen', background='palegreen')
         self.comment_table.tag_configure('lightcoral', background='lightcoral')
@@ -505,57 +519,56 @@ class StitcherGUI(object):
 
     def update_progressbar(self, progress):
         """Update the progressbar fill to based on the current task progress"""
-        full_width = 800
-        if progress < 0:  # Switch to passive not running anything mode
-            self.progressbar.itemconfigure(self.progress_bg, fill='')
-            fill_pixels = 0
-        else:  # Switch to active running a task mode (fully visible progressbar)
-            self.progressbar.itemconfigure(self.progress_bg, fill='White')
-            fill_pixels = round(full_width * progress / 100)
-        self.progressbar.coords(self.progress_fill, (0, 0, fill_pixels, 5))
+        if self.progressbar:
+            console_width = self.console.winfo_width()
+            if progress < 0:
+                self.progressbar.itemconfig(self.progress_fill, state='hidden')
+            else:
+                progress = max(0, min(progress, 100))
+                self.progressbar.itemconfig(self.progress_fill, state='normal')
+                self.progressbar.coords(self.progress_fill, 0, 0, progress * console_width / 100, 20)
+            self.progressbar.coords(self.progress_bg, 0, 0, console_width, 20)
+            self.progressbar.update()
 
-    def build_bot_row(self):
-        bot_row = tk.Frame(master=self.root, padx=10, pady=10)
+    def build_bot_row(self, parent):
+        bot_row = tk.Frame(parent)
+        bot_row.columnconfigure(0, weight=1)
+        bot_row.columnconfigure(1, weight=4)
+        bot_row.rowconfigure(0, weight=1)
+        bot_row.rowconfigure(1, weight=0)
 
-        # Build the console window
-        console_frame = tk.Frame(master=bot_row, width=110, height=10, padx=5)
-        self.console = tk.Text(master=console_frame, width=100, height=12, state='disabled')
-        self.console.pack(side=tk.TOP, anchor=tk.NW)
-        self.progressbar = tk.Canvas(master=console_frame, width=800, height=5)
-        self.progress_bg = self.progressbar.create_rectangle(0, 0, 800, 5, fill='', outline='')
-        self.progress_fill = self.progressbar.create_rectangle(
-            0, 0, 0, 5, fill='SteelBlue1', outline=''
-        )
-        self.progressbar.pack(side=tk.TOP, anchor=tk.NW)
-        console_frame.pack(side=tk.LEFT)
+        console_frame = tk.Frame(bot_row)
+        self.console = tk.Text(console_frame, height=12, state='disabled')
+        self.console.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(console_frame, orient=tk.VERTICAL, command=self.console.yview)
+        self.console.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        console_frame.grid(row=0, column=0, padx=5, pady=5, sticky='nsew')
+
+        progressbar_frame = tk.Frame(bot_row)
+        progressbar_frame.columnconfigure(0, weight=1)
+        self.progressbar = tk.Canvas(progressbar_frame, height=20)
+        self.progressbar.grid(row=0, column=0, sticky='ew')
+        progressbar_frame.grid(row=1, column=0, padx=5, pady=5, sticky='ew')
+
+        self.progress_bg = self.progressbar.create_rectangle(0, 0, 0, 20, fill='white')
+        self.progress_fill = self.progressbar.create_rectangle(0, 0, 0, 20, fill='Steelblue1')
 
         # Add formatting to the console
         self.console.tag_configure('error', foreground='red')
         self.console.tag_configure('warning', foreground='DarkOrange3')
 
         # Add the master action buttons
-        button_width = 15
-        button_frame = tk.Frame(master=bot_row, padx=10)
-        stitch_button = tk.Button(
-            button_frame,
-            text='Stitch',
-            background='steelblue1',
-            command=self.do_stitch,
-            width=button_width,
-            pady=2,
-        )
-        stitch_button.pack(side=tk.TOP, pady=10)
-        reset_button = tk.Button(button_frame, text='Reset', command=self.full_reset, width=button_width, pady=2)
-        reset_button.pack(side=tk.TOP, pady=10)
-        exit_button = tk.Button(
-            button_frame,
-            text='Exit',
-            background='lightcoral',
-            command=self.close_and_exit,
-            width=button_width,
-            pady=2)
-        exit_button.pack(side=tk.TOP, pady=10)
-        button_frame.pack(side=tk.LEFT)
+        button_frame = tk.Frame(bot_row)
+        stitch_button = tk.Button(button_frame, text='Stitch', background='Steelblue1', command=self.do_stitch)
+        stitch_button.pack(padx=5, pady=5)
+        reset_button = tk.Button(button_frame, text='Reset', command=self.full_reset)
+        reset_button.pack(padx=5, pady=5)
+        exit_button = tk.Button(button_frame, text='Exit', background='lightcoral', command=self.close_and_exit)
+        exit_button.pack(padx=5, pady=5)
+        button_frame.grid(row=0, column=1, padx=5, pady=5, sticky='sw')
 
         return bot_row
 
