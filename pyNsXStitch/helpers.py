@@ -166,7 +166,10 @@ def get_all_nev_comments(nev_filenames, gui_updater=None):
             warnings.warn(f'Found no comments in NeV file! \n  {nev_filenames[i]}')
             continue
         all_easy_read.append(easy_read)
-    easy_read = pd.concat(all_easy_read)
+    if all_easy_read:
+        easy_read = pd.concat(all_easy_read)
+    else:
+        easy_read = pd.DataFrame.from_dict({'CharSet': [], 'Flag': [], 'Data': [], 'Comment': []})
     return easy_read
 
 
