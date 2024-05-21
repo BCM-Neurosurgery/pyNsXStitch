@@ -37,7 +37,7 @@ class StitchedNeVFile(object):
         prev_meta, prev_data = [None, None], None
 
         for file_i, filename in enumerate(self.files):
-            nev_file = NevFile(filename)
+            nev_file = NevFile(filename, verbose=False, interactive=False)
             streamer = stream_nev_packets(nev_file, start_ts=self.start_timestamp, end_ts=self.end_timestamp)
             for meta, packet_data in streamer:
                 if gui_updater is not None and duration is not None:
@@ -62,7 +62,7 @@ class StitchedNeVFile(object):
         """"""
 
         # Copy all the headers from the origin file
-        origin = NevFile(self.files[0])
+        origin = NevFile(self.files[0], verbose=False, interactive=False)
         origin.datafile.seek(0, 0)
         out_file.seek(0, 0)
 
@@ -102,7 +102,7 @@ class StitchedNsXFile(object):
             if self.end_timestamp is not None and self.start_timestamp is not None \
             else None
         for file_i, filename in enumerate(self.files):
-            nsx_file = NsxFile(filename)
+            nsx_file = NsxFile(filename, verbose=False, interactive=False)
             streamer = stream_nsx_data(
                 nsx_file,
                 read_start_ts=self.start_timestamp,
@@ -119,7 +119,7 @@ class StitchedNsXFile(object):
     def write_headers(self, out_file):
 
         # Load an NsX file to pull headers from
-        origin = NsxFile(self.files[0])
+        origin = NsxFile(self.files[0], verbose=False, interactive=False)
         origin.datafile.seek(0, 0)
 
         # Verify that the NsX file is written in the supported format
