@@ -11,7 +11,7 @@ long_description = (here / "README.md").read_text(encoding="utf-8")
 #   https://packaging.python.org/en/latest/guides/distributing-packages-using-setuptools/
 setup(
     name="pyNsXStitch",
-    version="0.1.7",
+    version="0.1.8",
     description="Package to stitch blackrock toc mode recording files",
     long_description=long_description,
     long_description_content_type="text/markdown",
