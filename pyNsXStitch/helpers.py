@@ -19,7 +19,7 @@ REC_EVENT_PACKET_ID = 65529
 
 def get_all_streamed_files(directory, full_paths=False):
     """
-    Find all the streamed blackrock toc mode files in a directory
+    Find all the streamed Blackrock TOC mode files in a directory.
 
     This includes all NsX and NeV files. No other metadata files are included.
 
@@ -28,30 +28,36 @@ def get_all_streamed_files(directory, full_paths=False):
     :return: dictionary of file names keyed by blackrock file type
     """
     all_files = os.listdir(directory)
-    nsp_ids = np.unique([f_name.split('-')[0] for f_name in all_files])
-    nsp_files = {
-        nsp_id: [f_name for f_name in all_files if f_name.startswith(nsp_id)]
-        for nsp_id in nsp_ids
-    }
-    streamed_files = {
-        nsp_id: {"NeV": []} for nsp_id in nsp_ids
-    }
+    streamed_files = {}
 
-    # Iter through all files for both NSPs
-    for nsp_id, files in nsp_files.items():
-        for file_path in files:
-            file_path = os.path.join(directory, file_path) if full_paths else file_path
-            if file_path.endswith(".nev"):
-                streamed_files[nsp_id]['NeV'].append(file_path)
-            nsx_match = re.search(r'\.ns([0-9])$', file_path)
-            if nsx_match:
-                nsx_num = int(nsx_match.group(1))
-                file_type = f'Ns{nsx_num}'
-                if file_type not in streamed_files[nsp_id]:
-                    streamed_files[nsp_id][file_type] = []
-                streamed_files[nsp_id][file_type].append(file_path)
+    for file_name in all_files:
+        if file_name.endswith(".nev") or re.search(r'\.ns[0-9]$', file_name):
+            nsp_id, timestamp = file_name.split('-', 1)
+            # Need to use full timestamp string for sorting, like "20240314-143445-001"
+            timestamp = timestamp.split('.')[0]
+            file_path = os.path.join(directory, file_name) if full_paths else file_name
 
-    streamed_files = {nps: files for nps, files in streamed_files.items() if files['NeV']}
+            if nsp_id not in streamed_files:
+                streamed_files[nsp_id] = {"NeV": []}
+
+            if file_name.endswith(".nev"):
+                streamed_files[nsp_id]['NeV'].append((timestamp, file_path))
+            else:
+                nsx_match = re.search(r'\.ns([0-9])$', file_name)
+                if nsx_match:
+                    nsx_num = int(nsx_match.group(1))
+                    file_type = f'Ns{nsx_num}'
+                    streamed_files[nsp_id].setdefault(file_type, []).append((timestamp, file_path))
+
+    # Sort files based on full timestamp string
+    for nsp_id in streamed_files:
+        for file_type in streamed_files[nsp_id]:
+            streamed_files[nsp_id][file_type].sort(key=lambda x: x[0])
+            streamed_files[nsp_id][file_type] = [file_path for _, file_path in streamed_files[nsp_id][file_type]]
+
+    # Keep only files with NeV file present
+    streamed_files = {nsp_id: files for nsp_id, files in streamed_files.items() if files['NeV']}
+
     return streamed_files
 
 
