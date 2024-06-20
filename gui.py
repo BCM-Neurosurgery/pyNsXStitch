@@ -138,6 +138,9 @@ def load_dir_async(gui):
         gui.update_patient_id()
         gui.notify(f'Found {len(gui.streamed_files["NeV"])} NeV files')
 
+        ### perf tracking 1: file loading ###
+        start_time = time.time()
+        
         # Iter through all the comment packets in all files
         gui.notify(f'Loading comments from NeV...')
         timestamps, comments = [], []
@@ -152,7 +155,10 @@ def load_dir_async(gui):
                 comments.append(comment)
         gui.update_progressbar(100)
         gui.notify(f'Found {len(timestamps)} comments...')
+        gui.notify(f"* Time to load comments: {time.time() - start_time:.4f} seconds")
 
+        ### perf tracking 2: comment loading ###
+        start_time = time.time()
         # Convert to a dataframe for drawing to the GUI
         timestamps = np.array(timestamps)
         first_nev = NevFile(gui.streamed_files['NeV'][0])
@@ -165,8 +171,13 @@ def load_dir_async(gui):
         })
         gui.full_comment_df = cleaned_df
         gui.notify('Finished loading comments. ')
+        gui.notify(f"* Time to load comments: {time.time() - start_time:.4f} seconds")
+
+        ### perf tracking 3: comment drawing ###
+        start_time = time.time()
         gui.reset_comments()
         gui.notify(f'Ready for time selection...\n')
+        gui.notify(f"* Time to draw comments: {time.time() - start_time:.4f} seconds")
         gui.update_progressbar(-1)
     except Exception as e:
         gui.disp_error(*sys.exc_info())
