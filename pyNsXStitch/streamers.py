@@ -15,53 +15,58 @@ def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
     :param nev_file: NeVFile object from which to stream packets
     :param start_ts:
     :param end_ts:
+    :param packet_type:
     :return:
     """
-    
+
     # Total number of bytes in both headers and a 0-indexed pointer to the first data packet
     end_of_header = nev_file.basic_header['BytesInHeader']
-    
+
     # Length (in bytes) of the fixed width data packets in the data section of the file
     data_packet_size = nev_file.basic_header['BytesInDataPackets']
-    
-    nev_file.datafile.seek(0, 2) # move fp to end of file
+
+    nev_file.datafile.seek(0, 2)  # Move fp to end of file
     end_of_file = nev_file.datafile.tell()
 
     n_packets = int((end_of_file - end_of_header) / data_packet_size)
 
-    nev_file.datafile.seek(end_of_header, 0) # Move fp to start of first data packet
+    # Move fp to start of first data packet
+    nev_file.datafile.seek(end_of_header, 0)
 
     # Define the structured data type for each packet
     packet_dtype = np.dtype([
-        ('timestamp', '<u8'), # np.uint64
-        ('packet_id', '<u2'), # np.uint16
+        ('timestamp', '<u8'),  # np.uint64
+        ('packet_id', '<u2'),  # np.uint16
         ('data', 'u1', data_packet_size - 10)
     ])
-
-    # [!] By default, memmap will start at the beginning of the file, even if filename is a file pointer fp and fp.tell() != 0
-    # So we still need to explicitly set the offset to the start of the data packets
-    # TODO: memory issue?
-    try:
-        raw_data = np.memmap(
-            nev_file.datafile, 
-            dtype=packet_dtype, 
-            mode="r", 
-            shape=(n_packets,), 
-            offset=end_of_header)
-    except OSError as e:
-        raise e
     
-    # Boolean masks to filter packet type and timestamp
-    mask_packet_type = raw_data['packet_id'] == packet_type if packet_type is not None else True
-    mask_start = raw_data['timestamp'] >= start_ts if start_ts is not None else True
-    mask_end = raw_data['timestamp'] <= end_ts if end_ts is not None else True
+    # Process data in the packet section by section to avoid memory issues
+    for start_idx in range(0, n_packets, DATA_PAGING_SIZE):
+        end_idx = min(start_idx + DATA_PAGING_SIZE, n_packets)
+        try:
+            raw_data = np.memmap(
+                nev_file.datafile,
+                dtype=packet_dtype,
+                mode="r",
+                shape=(end_idx - start_idx,),
+                offset=end_of_header + start_idx * data_packet_size)
+                # [!] By default, memmap will start at the beginning of the file, 
+                # even if filename is a file pointer fp and fp.tell() != 0
+                # So we still need to explicitly set the offset to the start of the data packets
+        except OSError as e:
+            raise e
 
-    mask_combined = mask_start & mask_end & mask_packet_type
-    
-    filtered_data = raw_data[mask_combined]
+        # Boolean masks to filter packet type and timestamp
+        mask_packet_type = raw_data['packet_id'] == packet_type if packet_type is not None else True
+        mask_start = raw_data['timestamp'] >= start_ts if start_ts is not None else True
+        mask_end = raw_data['timestamp'] <= end_ts if end_ts is not None else True
 
-    for timestamp, packet_id, data in filtered_data:
-        yield (timestamp, packet_id), data.tobytes()
+        mask_combined = mask_start & mask_end & mask_packet_type
+
+        filtered_data = raw_data[mask_combined]
+
+        for timestamp, packet_id, data in filtered_data:
+            yield (timestamp, packet_id), data.tobytes()
 
 
 def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
