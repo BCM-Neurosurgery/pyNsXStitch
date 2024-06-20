@@ -4,44 +4,64 @@ from struct import unpack
 import numpy as np
 from brpylib.brpylib import DATA_BYTE_SIZE
 
-
+TIMESTAMP_BYTE_SIZE = 8
 DATA_PAGING_SIZE = 1024**2
-
 
 def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
     """
     Iterator that sequentially yields all the packets saved in the NeV files
+    * Improved data loading: Use np.memmap to load all first, then filter for the packets we want
 
     :param nev_file: NeVFile object from which to stream packets
     :param start_ts:
     :param end_ts:
     :return:
     """
-
+    
+    # Total number of bytes in both headers and a 0-indexed pointer to the first data packet
     end_of_header = nev_file.basic_header['BytesInHeader']
-    whole_packet_size = nev_file.basic_header['BytesInDataPackets']
-    ts_size = 8
-    id_size = 2
-    packet_data_size = whole_packet_size - ts_size
+    
+    # Length (in bytes) of the fixed width data packets in the data section of the file
+    data_packet_size = nev_file.basic_header['BytesInDataPackets']
+    
+    nev_file.datafile.seek(0, 2) # move fp to end of file
+    end_of_file = nev_file.datafile.tell()
 
-    nev_file.datafile.seek(end_of_header, 0)
+    n_packets = int((end_of_file - end_of_header) / data_packet_size)
 
-    while nev_file.datafile.tell() < os.path.getsize(nev_file.datafile.name):
+    nev_file.datafile.seek(end_of_header, 0) # Move fp to start of first data packet
 
-        timestamp = unpack("<Q", nev_file.datafile.read(ts_size))[0]
+    # Define the structured data type for each packet
+    packet_dtype = np.dtype([
+        ('timestamp', '<u8'), # np.uint64
+        ('packet_id', '<u2'), # np.uint16
+        ('data', 'u1', data_packet_size - 10)
+    ])
 
-        if end_ts is not None and timestamp > end_ts:
-            # This packet was recorded after the end of our interval. We can finish looping
-            break
-        elif start_ts is not None and timestamp < start_ts:
-            # This packet was recorded before the start of our interval. Step to the next packet
-            nev_file.datafile.seek(packet_data_size, 1)
-        else:
-            # This data packet is within our interval. Return the contents
-            packet_id = unpack("<H", nev_file.datafile.read(id_size))[0]
-            raw_data = nev_file.datafile.read(packet_data_size - id_size)
-            if packet_type is None or packet_id == packet_type:
-                yield (timestamp, packet_id), raw_data
+    # [!] By default, memmap will start at the beginning of the file, even if filename is a file pointer fp and fp.tell() != 0
+    # So we still need to explicitly set the offset to the start of the data packets
+    # TODO: memory issue?
+    try:
+        raw_data = np.memmap(
+            nev_file.datafile, 
+            dtype=packet_dtype, 
+            mode="r", 
+            shape=(n_packets,), 
+            offset=end_of_header)
+    except OSError as e:
+        raise e
+    
+    # Boolean masks to filter packet type and timestamp
+    mask_packet_type = raw_data['packet_id'] == packet_type if packet_type is not None else True
+    mask_start = raw_data['timestamp'] >= start_ts if start_ts is not None else True
+    mask_end = raw_data['timestamp'] <= end_ts if end_ts is not None else True
+
+    mask_combined = mask_start & mask_end & mask_packet_type
+    
+    filtered_data = raw_data[mask_combined]
+
+    for timestamp, packet_id, data in filtered_data:
+        yield (timestamp, packet_id), data.tobytes()
 
 
 def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
