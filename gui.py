@@ -155,7 +155,7 @@ def load_dir_async(gui):
                 comments.append(comment)
         gui.update_progressbar(100)
         gui.notify(f'Found {len(timestamps)} comments...')
-        gui.notify(f"* Time to load comments: {time.time() - start_time:.4f} seconds")
+        gui.notify(f"* Time to load files: {time.time() - start_time:.4f} seconds")
 
         ### perf tracking 2: comment loading ###
         start_time = time.time()
