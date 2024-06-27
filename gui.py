@@ -453,41 +453,49 @@ class StitcherGUI(object):
 
         self.comment_table.bind('<ButtonRelease-1>', self.handle_comment_click)
         self.comment_table.bind('<Configure>', self.update_visible_rows)
-        self.comment_table.bind('<Expose>', self.update_visible_rows)  # Add this line
+        self.comment_table.bind('<Expose>', self.update_visible_rows)
 
         self.visible_rows = []
-        self.update_visible_rows()
+        # self.update_visible_rows()
     
     def update_visible_rows(self, event=None):
-        if not self.comment_table:
+        if not self.comment_table or self.comment_df.empty:
+            # print("Comment table not found or comment_df empty.")
             return
-
+       
         if not self.comment_table.winfo_viewable():
             self.comment_table.after(100, self.update_visible_rows)  # Reschedule the update
             return
 
-        first_visible_row = self.comment_table.identify_row(0)
-        last_visible_row = self.comment_table.identify_row(self.comment_table.winfo_height())
+        visible_iids = self.comment_table.get_children()
+        if not visible_iids:
+            # print("No visible iids")
+            # print(f"Comment DataFrame: {self.comment_df}")
+            # print(f"Treeview columns: {self.comment_table['columns']}")
+            return
 
-        if first_visible_row == '':
-            first_visible_row = 0
-        else:
-            first_visible_row = int(first_visible_row)
+        first_visible_iid = visible_iids[0]
+        last_visible_iid = visible_iids[-1]
 
-        if last_visible_row == '':
-            last_visible_row = len(self.comment_df) - 1
-        else:
-            last_visible_row = int(last_visible_row)
+        first_visible_row = self.comment_table.index(first_visible_iid)
+        last_visible_row = self.comment_table.index(last_visible_iid)
+
+        # print(f"First visible row: {first_visible_row}")
+        # print(f"Last visible row: {last_visible_row}")
 
         new_visible_rows = list(range(first_visible_row, last_visible_row + 1))
+        # print(f"New visible rows: {new_visible_rows}")
 
         for row in set(self.visible_rows) - set(new_visible_rows):
             self.comment_table.delete(self.comment_table.get_children()[row])
 
         for row in set(new_visible_rows) - set(self.visible_rows):
-            values = [self.comment_df.iloc[row][col] for col in self.comment_df.columns]
-            self.comment_table.insert('', row, values=values, tags=(self.get_row_color(self.comment_df.iloc[row]['Timestamp']),))
+            if 0 <= row < len(self.comment_df):
+                values = [self.comment_df.iloc[row][col] for col in self.comment_df.columns]
+                # print(f"Inserting row {row} with values: {values}")
+                self.comment_table.insert('', row, values=values, tags=(self.get_row_color(self.comment_df.iloc[row]['Timestamp']),))
 
+        # print(f"Treeview contents: {self.comment_table.get_children()}")
         self.visible_rows = new_visible_rows
 
     def handle_comment_click(self, event):
@@ -554,7 +562,10 @@ class StitcherGUI(object):
     def reset_comments(self):
         self.comment_df = self.full_comment_df
         if self.comment_table:
-            self.rebuild_comments()
+            self.comment_table.delete(*self.comment_table.get_children())
+            for index, row in self.comment_df.iterrows():
+                values = [row[col] for col in self.comment_df.columns]
+                self.comment_table.insert('', 'end', values=values, tags=(self.get_row_color(row['Timestamp']),))
         else:
             self.build_comment_table()
 
@@ -647,6 +658,7 @@ class StitcherGUI(object):
     def disp_error(self, exec, val, tb):
         """Display a caught error with traceback in the console"""
         formatted = traceback.format_exception(exec, val, tb)
+        print(formatted)
         for line in formatted:
             self.write_to_console(line, tags=('error',), pad_newline=False)
         self.notify('Process aborted')
