@@ -1,5 +1,6 @@
 import os
 import shutil
+import textwrap
 import sys, traceback
 import time
 import warnings
@@ -204,7 +205,7 @@ class StitcherGUI(object):
         self.root = self.init_window()
 
         # Variables used for tracking the GUI state
-        self.source_dir = tk.StringVar(self.root, value=None)
+        self.source_dir = tk.StringVar(self.root, value="/Users/_astoria/bcm/TestData-Jiaqi")
         self.output_dir = tk.StringVar(self.root, value=None)
         self.search_text = tk.StringVar(self.root, value='')
         self.file_name = tk.StringVar(self.root, value='stitched')
@@ -440,24 +441,25 @@ class StitcherGUI(object):
             self.table_area.yview_scroll(scroll, "units")
 
     def build_comment_table(self):
-        col_widths = [100, 100, 300, 300, 30, 30]
-        col_starts = [10, 110, 210, 510, 810, 840]
+        col_widths = [100, 100, 200, 250, 50, 50]
+        col_starts = [10, 110, 210, 410, 660, 710]
 
-        col_height = 40
-        y_offset = 20
-        bttn_offset = 7
+        headers = ['Timestamp', 'Time Elapsed', 'Comment', 'File Name', 'Start', 'Stop']
+
+        col_height = 60
         canvas_width = sum(col_widths)
         canvas_height = col_height * (1 + len(self.comment_df))
 
-        # Build the headers:
+        # Build headers:
         header_frame = tk.Frame(self.comment_frame)
-        for i, col in enumerate(self.comment_df.columns):
-            tk.Label(header_frame, text=col, width=col_widths[i]//10).pack(side=tk.LEFT)
-        
-        start_stop_label = tk.Label(header_frame, text='Start/Stop')
-        start_stop_label.pack(side=tk.LEFT)
-
         header_frame.pack(side=tk.TOP, fill=tk.X)
+
+        # Create a Canvas for header labels
+        header_canvas = tk.Canvas(header_frame, width=canvas_width, height=col_height)
+        header_canvas.pack(side=tk.LEFT, fill=tk.X)
+
+        for i, col in enumerate(headers):
+            header_canvas.create_text(col_starts[i], col_height // 4, text=col, anchor='nw')
 
         # Create a vertical scrollbar and pack to the right of the comment frame
         self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL) 
@@ -482,18 +484,19 @@ class StitcherGUI(object):
             row_items = []
             row_ts = row_data[1]['Timestamp']
             row_color = self.get_row_color(i, row_ts)
-            row_yloc = y_offset + col_height * i
+            row_yloc = col_height * i
 
             bg_rectangle = self.table_area.create_rectangle(
-                0, row_yloc-5, canvas_width, row_yloc+col_height-5, fill=row_color, outline=''
+                0, row_yloc, canvas_width, row_yloc+col_height, fill=row_color, outline=''
             )
             row_items.append(bg_rectangle)
 
             for j, value in enumerate(row_data[1]):
                 text = self.comment_df.iloc[i, j]
-                self.table_area.create_text(col_starts[j], row_yloc, text=text, width=col_widths[j], anchor=tk.NW)
+                # Wrap the comment text to fit in the column width
+                wrapped_text = textwrap.fill(text, width=col_widths[j]) if j==2 else text
+                self.table_area.create_text(col_starts[j], row_yloc, text=wrapped_text, width=col_widths[j], anchor='nw')
 
-            buttn_y = row_yloc + bttn_offset
             start = tk.Radiobutton(
                 self.table_area,
                 variable=self.start_timestamp,
@@ -501,7 +504,8 @@ class StitcherGUI(object):
                 command=self.update_ts_lims,
                 background=row_color
             )
-            self.table_area.create_window(col_starts[4], buttn_y, window=start)
+            self.table_area.create_window(col_starts[4], row_yloc, window=start, anchor='nw')
+
             stop = tk.Radiobutton(
                 self.table_area,
                 variable=self.end_timestamp,
@@ -509,7 +513,7 @@ class StitcherGUI(object):
                 command=self.update_ts_lims,
                 background=row_color
             )
-            self.table_area.create_window(col_starts[5], buttn_y, window=stop)
+            self.table_area.create_window(col_starts[5], row_yloc, window=stop, anchor='nw')
             row_items.append(start)
             row_items.append(stop)
 
