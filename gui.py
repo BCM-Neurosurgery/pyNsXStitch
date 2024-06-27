@@ -1,17 +1,16 @@
 import os
 import shutil
-import textwrap
-import sys, traceback
+import sys
+import traceback
 import time
 import warnings
 import threading
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, ttk
 from datetime import datetime
 import numpy as np
 import pandas as pd
 from brpylib import NevFile
-from struct import unpack
 import xml.etree.ElementTree as xml
 from pyNsXStitch.stitchers import StitchedNsXFile, StitchedNeVFile
 from pyNsXStitch.helpers import get_all_nev_comments, get_all_streamed_files, get_nev_rec_start, \
@@ -83,7 +82,7 @@ def run_stitch_async(gui):
     
     
 def load_dir_async(gui):
-    """Do the work of loading the NeV files. Can be run asyncronously"""
+    """Do the work of loading the NeV files. Can be run asynchronously"""
     try:
         gui.update_progressbar(0)
         gui.notify(f'Loading data in: {gui.source_dir.get()}')
@@ -125,7 +124,6 @@ def load_dir_async(gui):
             tk.Button(master=buttons, text='Select', command=select).pack(side=tk.LEFT, anchor=tk.E)
             tk.Button(master=buttons, text='Cancel', command=cancel).pack(side=tk.LEFT, anchor=tk.E)
             buttons.pack(side=tk.TOP)
-            # win.mainloop()
 
             # Wait until the little popup window has been closed
             while not closed.get():
@@ -159,8 +157,7 @@ def load_dir_async(gui):
                 text_data = raw_data[6:]
                 comment = text_data.decode('ASCII').rstrip('\x00')  # TODO: handle other charsets
                 comments.append(comment)
-                file_names.append(os.path.basename(file)) # Store file name
-        
+                file_names.append(os.path.basename(file))  # store file name
         gui.update_progressbar(100)
         gui.notify(f'Found {len(timestamps)} comments...')
         gui.notify(f"* Time to load files: {time.time() - start_time:.4f} seconds")
@@ -205,7 +202,7 @@ class StitcherGUI(object):
         self.root = self.init_window()
 
         # Variables used for tracking the GUI state
-        self.source_dir = tk.StringVar(self.root, value="/Users/_astoria/bcm/TestData-Jiaqi")
+        self.source_dir = tk.StringVar(self.root, value=None)
         self.output_dir = tk.StringVar(self.root, value=None)
         self.search_text = tk.StringVar(self.root, value='')
         self.file_name = tk.StringVar(self.root, value='stitched')
@@ -227,9 +224,7 @@ class StitcherGUI(object):
         # Additional GUI elements
         self.time_frame = None
         self.comment_frame = None
-        self.table_elements = []
-        self.table_area = None
-        self.scroll = None
+        self.comment_table = None
         self.console = None
         self.progressbar = None
         self.progress_fill = None
@@ -248,7 +243,7 @@ class StitcherGUI(object):
         except tk.TclError:
             root.state('zoomed')
         root.title('Manual Time Alignment')
-        root.geometry("500x500")
+        root.geometry("1200x800")
         tk.Tk.report_callback_exception = self.disp_error
         warnings.showwarning = self.show_warning
         return root
@@ -257,7 +252,7 @@ class StitcherGUI(object):
     def init_comments():
         """Initialize an empty comment dataframe with just headers"""
         return pd.DataFrame.from_dict({
-            'Timestamp': [], 'TimeElapsed': [], 'Comment': []
+            'Timestamp': [], 'Time Elapsed': [], 'Comment': [], 'File Name': []
         })
 
     def build_gui(self):
@@ -310,7 +305,7 @@ class StitcherGUI(object):
         middle_row = tk.Frame(master=self.root, pady=20)
 
         time_select = self.build_time_select(middle_row)
-        time_select.pack(side=tk.LEFT, anchor=tk.N,)
+        time_select.pack(side=tk.LEFT, anchor=tk.N, fill=tk.BOTH, expand=True)
         info_column = self.build_info_column(middle_row)
         info_column.pack(side=tk.RIGHT, anchor=tk.N)
 
@@ -329,7 +324,7 @@ class StitcherGUI(object):
         self.patient_id.set(f'Patient ID: {patient_id}')
 
     def build_info_column(self, parent):
-        info_column = tk.Frame(master=parent, height=300, width=50, highlightcolor='black')
+        info_column = tk.Frame(master=parent, highlightcolor='black')
 
         # Show the quick summary instructions
         instruction_path = os.path.join(os.path.dirname(__file__), 'GUI_quick_instructions.txt')
@@ -350,7 +345,7 @@ class StitcherGUI(object):
         self.time_frame = tk.Frame(master=parent)
 
         # Build all the controls on the left side of the time select frame
-        inputs = tk.Frame(master=self.time_frame, width=50, padx=10)
+        inputs = tk.Frame(master=self.time_frame, padx=10)
         tk.Label(master=inputs, text="Comment Search", ).pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
         tk.Entry(master=inputs, textvariable=self.search_text).pack(side=tk.TOP)
         buttons = tk.Frame(master=inputs)
@@ -422,15 +417,13 @@ class StitcherGUI(object):
         self.notify(f'Updating output name')
         self.file_name.set(found_name)
 
-    def get_row_color(self, row_idx, row_ts):
-        row_color = ['gray85', 'gray90'][row_idx % 2]
+    def get_row_color(self, row_ts):
         if self.start_timestamp.get() == row_ts:
-            row_color = 'palegreen'
+            return 'palegreen'
         elif self.end_timestamp.get() == row_ts:
-            row_color = 'lightcoral'
+            return 'lightcoral'
         elif self.start_timestamp.get() < row_ts < self.end_timestamp.get():
-            row_color = ['SkyBlue1', 'SteelBlue1'][row_idx % 2]
-        return row_color
+            return 'SteelBlue1'
 
     def mouse_scroll(self, event):
         shift = (event.state & 0x1) != 0
@@ -441,95 +434,51 @@ class StitcherGUI(object):
             self.table_area.yview_scroll(scroll, "units")
 
     def build_comment_table(self):
-        col_widths = [100, 100, 200, 250, 50, 50]
-        col_starts = [10, 110, 210, 410, 660, 710]
+        if self.comment_frame:
+            self.comment_frame.destroy()
 
-        headers = ['Timestamp', 'Time Elapsed', 'Comment', 'File Name', 'Start', 'Stop']
+        self.comment_frame = tk.Frame(master=self.time_frame)
+        self.comment_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        col_height = 60
-        canvas_width = sum(col_widths)
-        canvas_height = col_height * (1 + len(self.comment_df))
+        self.comment_table = ttk.Treeview(master=self.comment_frame, columns=list(self.comment_df.columns), show='headings')
+        for col in self.comment_df.columns:
+            self.comment_table.heading(col, text=col)
+            self.comment_table.column(col, width=100, stretch=True)
 
-        # Build headers:
-        header_frame = tk.Frame(self.comment_frame)
-        header_frame.pack(side=tk.TOP, fill=tk.X)
+        self.comment_table.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Create a Canvas for header labels
-        header_canvas = tk.Canvas(header_frame, width=canvas_width, height=col_height)
-        header_canvas.pack(side=tk.LEFT, fill=tk.X)
+        scrollbar = ttk.Scrollbar(self.comment_frame, orient=tk.VERTICAL, command=self.comment_table.yview)
+        self.comment_table.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        for i, col in enumerate(headers):
-            header_canvas.create_text(col_starts[i], col_height // 4, text=col, anchor='nw')
+        for idx, row in self.comment_df.iterrows():
+            values = [row[col] for col in self.comment_df.columns]
+            self.comment_table.insert('', 'end', values=values, tags=(self.get_row_color(row['Timestamp']),))
 
-        # Create a vertical scrollbar and pack to the right of the comment frame
-        self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL) 
-        self.scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.comment_table.tag_configure('palegreen', background='palegreen')
+        self.comment_table.tag_configure('lightcoral', background='lightcoral')
+        self.comment_table.tag_configure('SteelBlue1', background='SteelBlue1')
 
-        self.table_area = tk.Canvas(
-            self.comment_frame,
-            scrollregion=(0, 0, canvas_width, canvas_height),  # Set scrollable region
-            width=canvas_width, height=500 - col_height,
-            yscrollcommand=self.scroll.set  # Link canvas to vertical scrollbar
-        )
+        self.comment_table.bind('<ButtonRelease-1>', self.handle_comment_click)
 
-        self.table_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.table_area.bind('<MouseWheel>', self.mouse_scroll)
-
-        # Configure scrollbar and canvas to work together
-        self.scroll.config(command=self.table_area.yview)
-        self.table_area.config(yscrollcommand=self.scroll.set)
-
-        # For each entry in the comments table, add an entry, and build the appropriate selectors
-        for i, row_data in enumerate(self.comment_df.iterrows()):
-            row_items = []
-            row_ts = row_data[1]['Timestamp']
-            row_color = self.get_row_color(i, row_ts)
-            row_yloc = col_height * i
-
-            bg_rectangle = self.table_area.create_rectangle(
-                0, row_yloc, canvas_width, row_yloc+col_height, fill=row_color, outline=''
-            )
-            row_items.append(bg_rectangle)
-
-            for j, value in enumerate(row_data[1]):
-                text = self.comment_df.iloc[i, j]
-                # Wrap the comment text to fit in the column width
-                wrapped_text = textwrap.fill(text, width=col_widths[j]) if j==2 else text
-                self.table_area.create_text(col_starts[j], row_yloc, text=wrapped_text, width=col_widths[j], anchor='nw')
-
-            start = tk.Radiobutton(
-                self.table_area,
-                variable=self.start_timestamp,
-                value=row_ts,
-                command=self.update_ts_lims,
-                background=row_color
-            )
-            self.table_area.create_window(col_starts[4], row_yloc, window=start, anchor='nw')
-
-            stop = tk.Radiobutton(
-                self.table_area,
-                variable=self.end_timestamp,
-                value=row_ts,
-                command=self.update_ts_lims,
-                background=row_color
-            )
-            self.table_area.create_window(col_starts[5], row_yloc, window=stop, anchor='nw')
-            row_items.append(start)
-            row_items.append(stop)
-
-            self.table_elements.append(row_items)
-
-        self.table_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.scroll.pack(side=tk.RIGHT, fill=tk.Y)
+    def handle_comment_click(self, event):
+        region = self.comment_table.identify("region", event.x, event.y)
+        if region == "cell":
+            row = self.comment_table.identify_row(event.y)
+            timestamp = int(self.comment_table.item(row)['values'][0])
+            if self.start_timestamp.get() == 0 or timestamp < self.start_timestamp.get():
+                self.start_timestamp.set(timestamp)
+            else:
+                self.end_timestamp.set(timestamp)
+            self.update_ts_lims()
+            self.recolor_table()
 
     def recolor_table(self):
         """Update the colors of the rows in the comment table without re-building"""
-        for rox_idx, row_elements in enumerate(self.table_elements):
-            row_ts = self.comment_df.iloc[rox_idx, 0]
-            row_color = self.get_row_color(rox_idx, row_ts)
-            self.table_area.itemconfigure(row_elements[0], fill=row_color)
-            for button in row_elements[1:]:
-                button.configure(background=row_color)
+        for row_id in self.comment_table.get_children():
+            timestamp = int(self.comment_table.item(row_id)['values'][0])
+            color = self.get_row_color(timestamp)
+            self.comment_table.item(row_id, tags=(color,))
 
         if self.start_timestamp.get() > self.end_timestamp.get() > 0.0:
             self.error('WARNING: The start timestamp is greater than the end timestamp!\n'
@@ -579,16 +528,7 @@ class StitcherGUI(object):
 
     def rebuild_comments(self):
         """Build the comment dataframe section of the GUI from scratch"""
-        if self.comment_frame:
-            self.table_elements = []
-            self.comment_frame.destroy()
-
-        self.comment_frame = tk.Frame(master=self.time_frame)
-        self.comment_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL, background='white')
         self.build_comment_table()
-
         self.notify(f'Showing {len(self.comment_df)} matching comments')
 
     def load_dir(self):
