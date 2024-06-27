@@ -202,7 +202,7 @@ class StitcherGUI(object):
         self.root = self.init_window()
 
         # Variables used for tracking the GUI state
-        self.source_dir = tk.StringVar(self.root, value="/Users/_astoria/bcm/TestData-Jiaqi")
+        self.source_dir = tk.StringVar(self.root, value=None)
         self.output_dir = tk.StringVar(self.root, value=None)
         self.search_text = tk.StringVar(self.root, value='')
         self.file_name = tk.StringVar(self.root, value='stitched')
@@ -457,7 +457,7 @@ class StitcherGUI(object):
 
         self.visible_rows = []
         self.update_visible_rows()
-
+    
     def update_visible_rows(self, event=None):
         if not self.comment_table:
             return
@@ -466,8 +466,8 @@ class StitcherGUI(object):
             self.comment_table.after(100, self.update_visible_rows)  # Reschedule the update
             return
 
-        first_visible_row = self.comment_table.index('@0,0')
-        last_visible_row = self.comment_table.index(f'@0,{self.comment_table.winfo_height()}')
+        first_visible_row = self.comment_table.identify_row(0)
+        last_visible_row = self.comment_table.identify_row(self.comment_table.winfo_height())
 
         if first_visible_row == '':
             first_visible_row = 0
