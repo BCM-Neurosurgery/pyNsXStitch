@@ -9,14 +9,20 @@ DATA_PAGING_SIZE = 1024**2
 
 def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
     """
-    Iterator that sequentially yields all the packets saved in the NeV files
-    * Improved data loading: Use np.memmap to load all first, then filter for the packets we want
+    Iterator that sequentially yields all the packets saved in the NeV files.
+    
+    This function uses np.memmap to efficiently load the data packets from the file in a memory-mapped way. 
+    The data is processed in sections defined by DATA_PAGING_SIZE to avoid memory issues.
 
-    :param nev_file: NeVFile object from which to stream packets
-    :param start_ts:
-    :param end_ts:
-    :param packet_type:
-    :return:
+    :param nev_file:       NevFile object (defined in brpylib.py) from which to stream packets
+    :param start_ts:       [optional] {float} Starting time in seconds on NSP clock to filter for. Default: 0.0
+    :param end_ts:         [optional] {float} Ending time in seconds on NSP clock to filter for. Default: None
+    :param packet_type:    [optional] {int}   Packet ID to filter for. Default: None
+    :yield:                {tuple}: ((timestamp, packet_id), data) A tuple containing the packet information 
+                                        - timestamp: {int} Timestamp of the packet
+                                        - packet_id: {int} Packet ID of the packet
+                                        - data: {bytes} Raw data of the packet as bytes
+    :raises OSError:       If there is an issue while accessing the file using np.memmap.
     """
 
     # Total number of bytes in both headers and a 0-indexed pointer to the first data packet
