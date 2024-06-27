@@ -112,17 +112,27 @@ def get_nsx_start_timestamp(nsx_filepath):
 def find_nsx_in_range(nsx_filepaths, start_ts, end_ts, subtract_offset=False):
     """Find all nsx files that contain data in the given range (time elapsed in seconds)"""
     files = []
+    # Sort files by starting timestamps in ascending order
     sorted_filepaths = sorted(nsx_filepaths, key=get_nsx_start_timestamp)
     
+    # Files are now sorted by file_start
     for nsx_fp in sorted_filepaths:
         file_start = get_nsx_start_timestamp(nsx_fp)
+
+        #                  |                                 |
+        #                  start_ts                          end_ts 
+        #  |                   | 
+        #  file_start          file_end
         
-        # file starts after desired end timestamp, we can stop looking, bc files are sorted
+        # If current file starts AFTER desired end timestamp, we can stop looking,
+        # remaining files will also be outside of desired range
         if file_start > end_ts:
             break
         
         file_end = get_nsx_end_timestamp(nsx_fp)
         
+        # If current file ends after or at the desired start timestamp,
+        # it means this file contains data within our desired range
         if file_end >= start_ts:
             files.append(nsx_fp)
     
