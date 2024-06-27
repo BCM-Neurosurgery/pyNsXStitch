@@ -202,7 +202,7 @@ class StitcherGUI(object):
         self.root = self.init_window()
 
         # Variables used for tracking the GUI state
-        self.source_dir = tk.StringVar(self.root, value=None)
+        self.source_dir = tk.StringVar(self.root, value="/Users/_astoria/bcm/TestData-Jiaqi")
         self.output_dir = tk.StringVar(self.root, value=None)
         self.search_text = tk.StringVar(self.root, value='')
         self.file_name = tk.StringVar(self.root, value='stitched')
@@ -440,7 +440,7 @@ class StitcherGUI(object):
         self.comment_frame = tk.Frame(master=self.time_frame)
         self.comment_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.comment_table = ttk.Treeview(master=self.comment_frame, columns=list(self.comment_df.columns), show='headings')
+        self.comment_table = ttk.Treeview(master=self.comment_frame, columns=list(self.comment_df.columns), show='headings', height=20)
         for col in self.comment_df.columns:
             self.comment_table.heading(col, text=col)
             self.comment_table.column(col, width=100, stretch=True)
@@ -451,15 +451,44 @@ class StitcherGUI(object):
         self.comment_table.configure(yscroll=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        for idx, row in self.comment_df.iterrows():
-            values = [row[col] for col in self.comment_df.columns]
-            self.comment_table.insert('', 'end', values=values, tags=(self.get_row_color(row['Timestamp']),))
-
-        self.comment_table.tag_configure('palegreen', background='palegreen')
-        self.comment_table.tag_configure('lightcoral', background='lightcoral')
-        self.comment_table.tag_configure('SteelBlue1', background='SteelBlue1')
-
         self.comment_table.bind('<ButtonRelease-1>', self.handle_comment_click)
+        self.comment_table.bind('<Configure>', self.update_visible_rows)
+        self.comment_table.bind('<Expose>', self.update_visible_rows)  # Add this line
+
+        self.visible_rows = []
+        self.update_visible_rows()
+
+    def update_visible_rows(self, event=None):
+        if not self.comment_table:
+            return
+
+        if not self.comment_table.winfo_viewable():
+            self.comment_table.after(100, self.update_visible_rows)  # Reschedule the update
+            return
+
+        first_visible_row = self.comment_table.index('@0,0')
+        last_visible_row = self.comment_table.index(f'@0,{self.comment_table.winfo_height()}')
+
+        if first_visible_row == '':
+            first_visible_row = 0
+        else:
+            first_visible_row = int(first_visible_row)
+
+        if last_visible_row == '':
+            last_visible_row = len(self.comment_df) - 1
+        else:
+            last_visible_row = int(last_visible_row)
+
+        new_visible_rows = list(range(first_visible_row, last_visible_row + 1))
+
+        for row in set(self.visible_rows) - set(new_visible_rows):
+            self.comment_table.delete(self.comment_table.get_children()[row])
+
+        for row in set(new_visible_rows) - set(self.visible_rows):
+            values = [self.comment_df.iloc[row][col] for col in self.comment_df.columns]
+            self.comment_table.insert('', row, values=values, tags=(self.get_row_color(self.comment_df.iloc[row]['Timestamp']),))
+
+        self.visible_rows = new_visible_rows
 
     def handle_comment_click(self, event):
         region = self.comment_table.identify("region", event.x, event.y)
@@ -524,11 +553,13 @@ class StitcherGUI(object):
 
     def reset_comments(self):
         self.comment_df = self.full_comment_df
-        self.rebuild_comments()
+        if self.comment_table:
+            self.rebuild_comments()
+        else:
+            self.build_comment_table()
 
     def rebuild_comments(self):
-        """Build the comment dataframe section of the GUI from scratch"""
-        self.build_comment_table()
+        self.comment_table.after(0, self.update_visible_rows)  # Schedule the initial update
         self.notify(f'Showing {len(self.comment_df)} matching comments')
 
     def load_dir(self):
