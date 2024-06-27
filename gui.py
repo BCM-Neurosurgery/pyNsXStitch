@@ -383,11 +383,19 @@ class StitcherGUI(object):
         found_name = 'stitched'
         for idx, row in self.full_comment_df.iterrows():
             row_ts = row['Timestamp']
-            if self.start_timestamp.get() <= row_ts <= self.end_timestamp.get():
-                if row['Comment'].startswith('$TASKID'):
-                    # We found a filename comment within the search interval. Parse it and finish searching
-                    found_name = row['Comment'].split(' ')[1]
-                    break
+
+            # Assume comments are sorted by timestamp
+            # We're out of the search interval w/o finding a $TASKID. Finish searching
+            if row_ts > self.end_timestamp.get():
+                self.warn('No valid TASKID comment found in the time range')
+                break
+            # We're before the search interval, move to next comment
+            if row_ts < self.start_timestamp.get():
+                continue
+            # We found a filename comment. Parse it and finish searching
+            if row['Comment'].startswith('$TASKID'):
+                found_name = row['Comment'].split(' ')[1]
+                break
         
         if found_name == 'stitched':
             self.warn('No valid TASKID comment found in the time range')
