@@ -89,14 +89,18 @@ def load_dir_async(gui):
 
         # With the new version of central, data from multiple NSPs can be in the same folder
         all_streamed_files = get_all_streamed_files(gui.source_dir.get(), full_paths=True)
-        all_nsps = list(all_streamed_files.keys())
+        # Sort the NSPs for consistency
+        all_nsps = sorted(all_streamed_files)
+        
         if not all_nsps:
             gui.error('No streamed files with NSP information found!')
             return
+        
         elif len(all_nsps) == 1:
             # Only 1 NSP here, so we can move forward
             nsp = all_nsps[0]
             gui.streamed_files = all_streamed_files[nsp]
+        
         else:
             # Found multiple NSPs, ask the user to select
             def select(*args):
@@ -106,6 +110,7 @@ def load_dir_async(gui):
             def cancel(*args):
                 closed.set(True)
                 win.destroy()
+            
             gui.notify('Please select an NSP!')
             win = tk.Toplevel(gui.root)
             win.geometry("150x100")
@@ -378,16 +383,23 @@ class StitcherGUI(object):
         found_name = 'stitched'
         for idx, row in self.full_comment_df.iterrows():
             row_ts = row['Timestamp']
+
+            # Assume comments are sorted by timestamp
+            # We're out of the search interval w/o finding a $TASKID. Finish searching
             if row_ts > self.end_timestamp.get():
                 self.warn('No valid TASKID comment found in the time range')
-                break  # We're out of the search interval w/o finding a $TASKID. Finish searching
+                break
+            # We're before the search interval, move to next comment
             if row_ts < self.start_timestamp.get():
-                continue  # We're before the search interval, move to next comment
+                continue
+            # We found a filename comment. Parse it and finish searching
             if row['Comment'].startswith('$TASKID'):
-                # We found a filename comment. Parse it and finish searching
                 found_name = row['Comment'].split(' ')[1]
                 break
-
+        
+        if found_name == 'stitched':
+            self.warn('No valid TASKID comment found in the time range')
+        
         self.notify(f'Updating output name')
         self.file_name.set(found_name)
 
