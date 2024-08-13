@@ -1,6 +1,22 @@
+"""
+Script for manually stitching files without explicit saved comments
+
+All values in all capitals are considered parameters to be set by the user
+
+An example:
+
+Desired Interval:                        |---------------------------------------|
+NSP Chunks:          |------1------|------2------|------3------|------4------|------5------|
+Offsets                            |--a--|                                   |-b-|
+
+To achieve the stitching interval illustrated above, you would set:
+    START_CHUNK = 2             START_OFFSET = a
+    END_CHUNK = 5               END_OFFSET = b
+Note that the values 'a' and 'b' should be given in seconds
+"""
+
 import os
 import re
-from brpylib import NsxFile
 from pyNsXStitch.stitchers import StitchedNsXFile, StitchedNeVFile
 from pyNsXStitch.helpers import get_nsx_start_timestamp
 
