@@ -19,7 +19,7 @@ REC_EVENT_PACKET_ID = 65529
 
 def get_all_streamed_files(directory, full_paths=False):
     """
-    Find all the streamed blackrock toc mode files in a directory
+    Find all the streamed Blackrock TOC mode files in a directory.
 
     This includes all NsX and NeV files. No other metadata files are included.
 
@@ -28,30 +28,36 @@ def get_all_streamed_files(directory, full_paths=False):
     :return: dictionary of file names keyed by blackrock file type
     """
     all_files = os.listdir(directory)
-    nsp_ids = np.unique([f_name.split('-')[0] for f_name in all_files])
-    nsp_files = {
-        nsp_id: [f_name for f_name in all_files if f_name.startswith(nsp_id)]
-        for nsp_id in nsp_ids
-    }
-    streamed_files = {
-        nsp_id: {"NeV": []} for nsp_id in nsp_ids
-    }
+    streamed_files = {}
 
-    # Iter through all files for both NSPs
-    for nsp_id, files in nsp_files.items():
-        for file_path in files:
-            file_path = os.path.join(directory, file_path) if full_paths else file_path
-            if file_path.endswith(".nev"):
-                streamed_files[nsp_id]['NeV'].append(file_path)
-            nsx_match = re.search(r'\.ns([0-9])$', file_path)
-            if nsx_match:
-                nsx_num = int(nsx_match.group(1))
-                file_type = f'Ns{nsx_num}'
-                if file_type not in streamed_files[nsp_id]:
-                    streamed_files[nsp_id][file_type] = []
-                streamed_files[nsp_id][file_type].append(file_path)
+    for file_name in all_files:
+        if file_name.endswith(".nev") or re.search(r'\.ns[0-9]$', file_name):
+            nsp_id, timestamp = file_name.split('-', 1)
+            # Need to use full timestamp string for sorting, like "20240314-143445-001"
+            timestamp = timestamp.split('.')[0]
+            file_path = os.path.join(directory, file_name) if full_paths else file_name
 
-    streamed_files = {nps: files for nps, files in streamed_files.items() if files['NeV']}
+            if nsp_id not in streamed_files:
+                streamed_files[nsp_id] = {"NeV": []}
+
+            if file_name.endswith(".nev"):
+                streamed_files[nsp_id]['NeV'].append((timestamp, file_path))
+            else:
+                nsx_match = re.search(r'\.ns([0-9])$', file_name)
+                if nsx_match:
+                    nsx_num = int(nsx_match.group(1))
+                    file_type = f'Ns{nsx_num}'
+                    streamed_files[nsp_id].setdefault(file_type, []).append((timestamp, file_path))
+
+    # Sort files based on full timestamp string
+    for nsp_id in streamed_files:
+        for file_type in streamed_files[nsp_id]:
+            streamed_files[nsp_id][file_type].sort(key=lambda x: x[0])
+            streamed_files[nsp_id][file_type] = [file_path for _, file_path in streamed_files[nsp_id][file_type]]
+
+    # Keep only files with NeV file present
+    streamed_files = {nsp_id: files for nsp_id, files in streamed_files.items() if files['NeV']}
+
     return streamed_files
 
 
@@ -105,21 +111,31 @@ def get_nsx_start_timestamp(nsx_filepath):
 
 def find_nsx_in_range(nsx_filepaths, start_ts, end_ts, subtract_offset=False):
     """Find all nsx files that contain data in the given range (time elapsed in seconds)"""
-    in_range = False
     files = []
-    for nsx_fp in nsx_filepaths:
+    # Sort files by starting timestamps in ascending order
+    sorted_filepaths = sorted(nsx_filepaths, key=get_nsx_start_timestamp)
+    
+    # Files are now sorted by file_start
+    for nsx_fp in sorted_filepaths:
         file_start = get_nsx_start_timestamp(nsx_fp)
-        file_end = get_nsx_end_timestamp(nsx_fp)
-        if file_start <= start_ts < file_end:
-            in_range = True
-        elif end_ts <= file_end:
-            # We've found the end of the range, we can quit looping (but still include this file)
-            files.append(nsx_fp)
+
+        #                  |                                 |
+        #                  start_ts                          end_ts 
+        #  |                   | 
+        #  file_start          file_end
+        
+        # If current file starts AFTER desired end timestamp, we can stop looking,
+        # remaining files will also be outside of desired range
+        if file_start > end_ts:
             break
-
-        if in_range:
+        
+        file_end = get_nsx_end_timestamp(nsx_fp)
+        
+        # If current file ends after or at the desired start timestamp,
+        # it means this file contains data within our desired range
+        if file_end >= start_ts:
             files.append(nsx_fp)
-
+    
     return files
 
 

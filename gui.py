@@ -1,5 +1,6 @@
 import os
 import shutil
+import textwrap
 import sys, traceback
 import time
 import warnings
@@ -89,14 +90,18 @@ def load_dir_async(gui):
 
         # With the new version of central, data from multiple NSPs can be in the same folder
         all_streamed_files = get_all_streamed_files(gui.source_dir.get(), full_paths=True)
-        all_nsps = list(all_streamed_files.keys())
+        # Sort the NSPs for consistency
+        all_nsps = sorted(all_streamed_files)
+        
         if not all_nsps:
             gui.error('No streamed files with NSP information found!')
             return
+        
         elif len(all_nsps) == 1:
             # Only 1 NSP here, so we can move forward
             nsp = all_nsps[0]
             gui.streamed_files = all_streamed_files[nsp]
+        
         else:
             # Found multiple NSPs, ask the user to select
             def select(*args):
@@ -106,6 +111,7 @@ def load_dir_async(gui):
             def cancel(*args):
                 closed.set(True)
                 win.destroy()
+            
             gui.notify('Please select an NSP!')
             win = tk.Toplevel(gui.root)
             win.geometry("150x100")
@@ -140,7 +146,7 @@ def load_dir_async(gui):
 
         # Iter through all the comment packets in all files
         gui.notify(f'Loading comments from NeV...')
-        timestamps, comments = [], []
+        timestamps, comments, file_names = [], [], []
         n_files = len(gui.streamed_files["NeV"])
         for i, file in enumerate(gui.streamed_files["NeV"]):
             nev = NevFile(file)
@@ -150,6 +156,8 @@ def load_dir_async(gui):
                 text_data = raw_data[6:]
                 comment = text_data.decode('ASCII').rstrip('\x00')  # TODO: handle other charsets
                 comments.append(comment)
+                file_names.append(os.path.basename(file)) # Store file name
+        
         gui.update_progressbar(100)
         gui.notify(f'Found {len(timestamps)} comments...')
 
@@ -161,8 +169,10 @@ def load_dir_async(gui):
         cleaned_df = pd.DataFrame.from_dict({
             'Timestamp': timestamps,
             'Time Elapsed': np.round((timestamps - gui.nev_start) / gui.ts_freq, 2),
-            'Comment': comments
+            'Comment': comments,
+            'File Name': file_names
         })
+
         gui.full_comment_df = cleaned_df
         gui.notify('Finished loading comments. ')
         gui.reset_comments()
@@ -289,7 +299,8 @@ class StitcherGUI(object):
         time_select = self.build_time_select(middle_row)
         time_select.pack(side=tk.LEFT, anchor=tk.N,)
         info_column = self.build_info_column(middle_row)
-        info_column.pack(side=tk.LEFT, anchor=tk.N)
+        info_column.pack(side=tk.RIGHT, anchor=tk.N)
+
         return middle_row
 
     def update_patient_id(self):
@@ -378,16 +389,23 @@ class StitcherGUI(object):
         found_name = 'stitched'
         for idx, row in self.full_comment_df.iterrows():
             row_ts = row['Timestamp']
+
+            # Assume comments are sorted by timestamp
+            # We're out of the search interval w/o finding a $TASKID. Finish searching
             if row_ts > self.end_timestamp.get():
                 self.warn('No valid TASKID comment found in the time range')
-                break  # We're out of the search interval w/o finding a $TASKID. Finish searching
+                break
+            # We're before the search interval, move to next comment
             if row_ts < self.start_timestamp.get():
-                continue  # We're before the search interval, move to next comment
+                continue
+            # We found a filename comment. Parse it and finish searching
             if row['Comment'].startswith('$TASKID'):
-                # We found a filename comment. Parse it and finish searching
                 found_name = row['Comment'].split(' ')[1]
                 break
-
+        
+        if found_name == 'stitched':
+            self.warn('No valid TASKID comment found in the time range')
+        
         self.notify(f'Updating output name')
         self.file_name.set(found_name)
 
@@ -410,49 +428,66 @@ class StitcherGUI(object):
             self.table_area.yview_scroll(scroll, "units")
 
     def build_comment_table(self):
+        col_widths = [90, 90, 300, 200, 30, 30]
+        col_starts = [10, 100, 190, 490, 690, 720]
 
-        col_widths = [100, 100, 250, 30, 30]
-        col_starts = [10, 110, 210, 460, 490]
-        col_height = 25
-        y_offset = 10
-        bttn_offset = 7
-        canvas_width = sum(col_widths)
-        canvas_height = col_height * (1+len(self.comment_df))
+        headers = ['Timestamp', 'Time Elapsed', 'Comment', 'File Name', 'Start', 'Stop']
+
+        row_height = 35
+        canvas_width = col_starts[-1] + col_widths[-1]
+        canvas_height = row_height * (1 + len(self.comment_df))
+
+        # Build headers:
+        header_frame = tk.Frame(self.comment_frame)
+        header_frame.pack(side=tk.TOP, fill=tk.X)
+
+        # Create a Canvas for header labels
+        header_canvas = tk.Canvas(header_frame, width=canvas_width, height=row_height)
+        header_canvas.pack(side=tk.LEFT, fill=tk.X)
+
+        for i, col in enumerate(headers):
+            header_canvas.create_text(col_starts[i], row_height // 4, text=col, anchor='nw')
+
+        # Create a vertical scrollbar and pack to the right of the comment frame
+        self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL) 
+        self.scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.table_area = tk.Canvas(
             self.comment_frame,
-            scrollregion=(0, 0, canvas_width, canvas_height),
-            width=canvas_width, height=500,
-            yscrollcommand=self.scroll.set
+            scrollregion=(0, 0, canvas_width, canvas_height),  # Set scrollable region
+            width=canvas_width, height=500 - row_height,
+            yscrollcommand=self.scroll.set  # Link canvas to vertical scrollbar
         )
+
+        self.table_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.table_area.bind('<MouseWheel>', self.mouse_scroll)
 
-        # Build the headers:
-        for i, col in enumerate(self.comment_df.columns):
-            self.table_area.create_text(col_starts[i], y_offset,  text=col, width=col_widths[i], anchor=tk.NW)
-        self.table_area.create_text(
-            col_starts[3]-15, y_offset,
-            text=r'Start\Stop',
-            width=sum(col_widths[3:]),
-            anchor=tk.NW)
+        # Configure scrollbar and canvas to work together
+        self.scroll.config(command=self.table_area.yview)
+        self.table_area.config(yscrollcommand=self.scroll.set)
 
         # For each entry in the comments table, add an entry, and build the appropriate selectors
         for i, row_data in enumerate(self.comment_df.iterrows()):
             row_items = []
             row_ts = row_data[1]['Timestamp']
             row_color = self.get_row_color(i, row_ts)
-            row_yloc = y_offset + col_height * (1+i)
+            row_yloc = row_height * i
 
-            bg_rectange = self.table_area.create_rectangle(
-                0, row_yloc-5, canvas_width, row_yloc+col_height-5, fill=row_color, outline=''
+            bg_rectangle = self.table_area.create_rectangle(
+                0, row_yloc, canvas_width, row_yloc+row_height, fill=row_color, outline=''
             )
-            row_items.append(bg_rectange)
+            row_items.append(bg_rectangle)
 
             for j, value in enumerate(row_data[1]):
                 text = self.comment_df.iloc[i, j]
-                self.table_area.create_text(col_starts[j], row_yloc,  text=text, width=col_widths[j], anchor=tk.NW)
+                # Wrap the comment text to fit in the column width
+                if j == 2:
+                    spaced = text.replace('_', ' ')
+                    ready_text = textwrap.fill(spaced, width=col_widths[j], break_long_words=False)
+                else:
+                    ready_text = text
+                self.table_area.create_text(col_starts[j], row_yloc, text=ready_text, width=col_widths[j], anchor='nw')
 
-            buttn_y = row_yloc + bttn_offset
             start = tk.Radiobutton(
                 self.table_area,
                 variable=self.start_timestamp,
@@ -460,7 +495,8 @@ class StitcherGUI(object):
                 command=self.update_ts_lims,
                 background=row_color
             )
-            self.table_area.create_window(col_starts[3], buttn_y, window=start)
+            self.table_area.create_window(col_starts[4], row_yloc, window=start, anchor='nw')
+
             stop = tk.Radiobutton(
                 self.table_area,
                 variable=self.end_timestamp,
@@ -468,12 +504,14 @@ class StitcherGUI(object):
                 command=self.update_ts_lims,
                 background=row_color
             )
-            self.table_area.create_window(col_starts[4], buttn_y, window=stop)
+            self.table_area.create_window(col_starts[5], row_yloc, window=stop, anchor='nw')
             row_items.append(start)
             row_items.append(stop)
+
             self.table_elements.append(row_items)
-        self.table_area.pack(side=tk.LEFT)
-        self.scroll.config(command=self.table_area.yview)
+
+        self.table_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
     def recolor_table(self):
         """Update the colors of the rows in the comment table without re-building"""
@@ -536,12 +574,12 @@ class StitcherGUI(object):
             self.table_elements = []
             self.comment_frame.destroy()
 
-        self.comment_frame = tk.Frame(master=self.time_frame, pady=10, padx=20, height=300, borderwidth=1)
+        self.comment_frame = tk.Frame(master=self.time_frame)
+        self.comment_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
         self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL, background='white')
-        self.scroll.pack(side=tk.RIGHT, fill='y')
         self.build_comment_table()
 
-        self.comment_frame.pack(side=tk.LEFT, anchor=tk.N)
         self.notify(f'Showing {len(self.comment_df)} matching comments')
 
     def load_dir(self):
