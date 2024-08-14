@@ -428,25 +428,25 @@ class StitcherGUI(object):
             self.table_area.yview_scroll(scroll, "units")
 
     def build_comment_table(self):
-        col_widths = [100, 100, 200, 250, 50, 50]
-        col_starts = [10, 110, 210, 410, 660, 710]
+        col_widths = [90, 90, 300, 200, 30, 30]
+        col_starts = [10, 100, 190, 490, 690, 720]
 
         headers = ['Timestamp', 'Time Elapsed', 'Comment', 'File Name', 'Start', 'Stop']
 
-        col_height = 60
-        canvas_width = sum(col_widths)
-        canvas_height = col_height * (1 + len(self.comment_df))
+        row_height = 35
+        canvas_width = col_starts[-1] + col_widths[-1]
+        canvas_height = row_height * (1 + len(self.comment_df))
 
         # Build headers:
         header_frame = tk.Frame(self.comment_frame)
         header_frame.pack(side=tk.TOP, fill=tk.X)
 
         # Create a Canvas for header labels
-        header_canvas = tk.Canvas(header_frame, width=canvas_width, height=col_height)
+        header_canvas = tk.Canvas(header_frame, width=canvas_width, height=row_height)
         header_canvas.pack(side=tk.LEFT, fill=tk.X)
 
         for i, col in enumerate(headers):
-            header_canvas.create_text(col_starts[i], col_height // 4, text=col, anchor='nw')
+            header_canvas.create_text(col_starts[i], row_height // 4, text=col, anchor='nw')
 
         # Create a vertical scrollbar and pack to the right of the comment frame
         self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL) 
@@ -455,7 +455,7 @@ class StitcherGUI(object):
         self.table_area = tk.Canvas(
             self.comment_frame,
             scrollregion=(0, 0, canvas_width, canvas_height),  # Set scrollable region
-            width=canvas_width, height=500 - col_height,
+            width=canvas_width, height=500 - row_height,
             yscrollcommand=self.scroll.set  # Link canvas to vertical scrollbar
         )
 
@@ -471,18 +471,22 @@ class StitcherGUI(object):
             row_items = []
             row_ts = row_data[1]['Timestamp']
             row_color = self.get_row_color(i, row_ts)
-            row_yloc = col_height * i
+            row_yloc = row_height * i
 
             bg_rectangle = self.table_area.create_rectangle(
-                0, row_yloc, canvas_width, row_yloc+col_height, fill=row_color, outline=''
+                0, row_yloc, canvas_width, row_yloc+row_height, fill=row_color, outline=''
             )
             row_items.append(bg_rectangle)
 
             for j, value in enumerate(row_data[1]):
                 text = self.comment_df.iloc[i, j]
                 # Wrap the comment text to fit in the column width
-                wrapped_text = textwrap.fill(text, width=col_widths[j]) if j==2 else text
-                self.table_area.create_text(col_starts[j], row_yloc, text=wrapped_text, width=col_widths[j], anchor='nw')
+                if j == 2:
+                    spaced = text.replace('_', ' ')
+                    ready_text = textwrap.fill(spaced, width=col_widths[j], break_long_words=False)
+                else:
+                    ready_text = text
+                self.table_area.create_text(col_starts[j], row_yloc, text=ready_text, width=col_widths[j], anchor='nw')
 
             start = tk.Radiobutton(
                 self.table_area,
