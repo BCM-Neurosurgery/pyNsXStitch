@@ -3,15 +3,16 @@
 Small helper library to stitch together Blackrock NeV and NsX files from a chunked recording into task specific files 
 based on comments
 
-**** WARNING: THIS CODE IS STILL IN THE TEST/VERIFICATION STAGE. ***
-
 Please report any bugs and issues you find as issues on the github repo:
 https://github.com/BCM-Neurosurgery/pyNsXStitch/issues
 
 ## Installation
 
 ### Stand-alone
-To install this as a python project you can use to perform custom stitching:
+This is the option you want to follow if:
+  - You want to use the GUI to stitch data
+  - You want to write a one-off script to do some custom stitching
+To install this code as a stand-alone peice of software:
   - Make sure you have a python environment (conda recommended) install with python 3.10 or greater
   - Clone the repository
     ```bash
