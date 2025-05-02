@@ -12,8 +12,9 @@ https://github.com/BCM-Neurosurgery/pyNsXStitch/issues
 This is the option you want to follow if:
   - You want to use the GUI to stitch data
   - You want to write a one-off script to do some custom stitching
+
 To install this code as a stand-alone peice of software:
-  - Make sure you have a python environment (conda recommended) install with python 3.10 or greater
+  - Make sure you have a python environment active (conda recommended) running at least python 3.10:
   - Clone the repository
     ```bash
     git clone git@github.com:BCM-Neurosurgery/pyNsXStitch.git
