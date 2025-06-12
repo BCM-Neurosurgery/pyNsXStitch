@@ -1,0 +1,11 @@
+README.md
+setup.py
+pyNsXStitch/__init__.py
+pyNsXStitch/helpers.py
+pyNsXStitch/stitchers.py
+pyNsXStitch/streamers.py
+pyNsXStitch.egg-info/PKG-INFO
+pyNsXStitch.egg-info/SOURCES.txt
+pyNsXStitch.egg-info/dependency_links.txt
+pyNsXStitch.egg-info/requires.txt
+pyNsXStitch.egg-info/top_level.txt

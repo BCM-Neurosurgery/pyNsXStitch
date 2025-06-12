@@ -108,13 +108,6 @@ def get_nsx_start_timestamp(nsx_filepath):
     finally:
         del nsx
 
-def get_total_pred_samples_ns3(nsx_file_path):
-    file = NsxFile(nsx_file_path)
-    total_samples = file.getdata()['data_headers'][0]['NumDataPoints']
-
-    pred_samples = get_nsx_duration(nsx_file_path)/15 #30 kHZ sample clock / 15 ticks per 2kHz sample
-    
-    return total_samples, pred_samples
 
 def find_nsx_in_range(nsx_filepaths, start_ts, end_ts, subtract_offset=False):
     """Find all nsx files that contain data in the given range (time elapsed in seconds)"""
