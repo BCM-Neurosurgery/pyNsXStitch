@@ -18,7 +18,7 @@ def recurse_remove_audio(file_path, base_dir=None, out_dir=None):
         if os.path.isdir(full_path):
             results_inside = recurse_remove_audio(full_path, base_dir=base_dir)
             results[thing_here] = results_inside
-        elif re.search('\.ns[1-9]$', thing_here):
+        elif re.search(r'\.ns[1-9]$', thing_here):
             nsx_file = NsxFile(full_path)
             if base_dir and out_dir:
                 out_file = os.path.join(out_dir, os.path.relpath(full_path, base_dir))

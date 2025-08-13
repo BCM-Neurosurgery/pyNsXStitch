@@ -9,7 +9,7 @@ AUDIO_CHAN_NAMES = [
 def remove_audio_nsx(nsx_file: NsxFile, output_filename: str):
 
     non_audio_channels = []
-    for i, metadata in nsx_file.extended_headers:
+    for i, metadata in enumerate(nsx_file.extended_headers):
         for forbidden in AUDIO_CHAN_NAMES:
             if forbidden in metadata['ElectrodeLabel']:
                 print(f'Removing channel {metadata["ElectrodeLabel"]}')
