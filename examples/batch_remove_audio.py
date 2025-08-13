@@ -3,7 +3,6 @@ import re
 
 from brpylib import NsxFile
 
-from examples.nev_search_test import out_file
 from pyNsXStitch.anonymizers import remove_audio_nsx
 
 def recurse_remove_audio(file_path, base_dir=None, out_dir=None):
