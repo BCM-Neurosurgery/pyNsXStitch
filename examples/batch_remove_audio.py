@@ -23,6 +23,8 @@ def recurse_remove_audio(file_path, base_dir=None, out_dir=None):
             nsx_file = NsxFile(full_path)
             if base_dir and out_dir:
                 out_file = os.path.join(out_dir, os.path.relpath(full_path, base_dir))
+                out_dir = os.path.dirname(out_file)
+                os.makedirs(out_dir, exist_ok=True)
             else:
                 out_file = None
             one_result = remove_audio_nsx(nsx_file, output_filename=out_file)
