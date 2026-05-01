@@ -1,7 +1,0 @@
-numpy
-pandas
-
-# Jupyter is not necessary unless you plan to run the example notebooks. Feel free to comment out this line
-# jupyter
-
-brpylib @ git+ssh://git@github.com/BCM-Neurosurgery/Blackrock-Python-Utilities.git@main
