@@ -23,7 +23,7 @@ class StitchedNeVFile(object):
 
     def get_max_packet_size(self):
         packet_sizes = [NevFile(filename).basic_header['BytesInDataPackets'] for filename in self.files]
-        print(packet_sizes)
+        print(f'Found {len(packet_sizes)} packets with sizes: {packet_sizes}')
         return max(packet_sizes)
 
     def iter_data(self, gui_updater=None, skip_duplicates=True):
