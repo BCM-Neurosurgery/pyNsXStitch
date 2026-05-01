@@ -307,12 +307,12 @@ class StitcherGUI(object):
         patient_id = '--'
         if self.source_dir.get():
             sif_files = [f for f in os.listdir(self.source_dir.get()) if f.endswith('.sif')]
-            sif_data = xml.parse(os.path.join(self.source_dir.get(), sif_files[0]))
-            patient = sif_data.getroot().findall('Patient/Id')[0].text
-            if patient is None:
+            if not sif_files:
                 patient_id = 'Unavailable'
             else:
-                patient_id = patient
+                sif_data = xml.parse(os.path.join(self.source_dir.get(), sif_files[0]))
+                patient = sif_data.getroot().findall('Patient/Id')[0].text
+                patient_id = patient if patient is not None else 'Unavailable'
         self.patient_id.set(f'Patient ID: {patient_id}')
 
     def build_info_column(self, parent):
