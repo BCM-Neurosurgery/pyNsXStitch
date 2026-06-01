@@ -10,7 +10,7 @@
    - You can manually enter a time elapsed as a decimal (in seconds, SS.sss) since the start of the recording for the
    `start` and `end` fields on the left side of the GUI. Press Update to apply these changes.
    - You can manually enter a time of day for the `start` and `end` fields on the left side of the GUI. Make sure your
-   start time is entered in 24hr format and includes a semicolon between hours minutes and seconds. Fractions of a second
+   start time is entered in 24hr format with colons between hours, minutes, and seconds. Fractions of a second
    should be entered as decimals (`HH:MM:SS.ss`). Press Update to apply these changes.
    Regardless of which method you use, the selected comments will be highlighted in the displayed comments table. Green
    shows that the selected comments occurs at exactly the start of the selected interval, red that it occurs exactly at the
