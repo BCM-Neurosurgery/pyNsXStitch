@@ -7,9 +7,8 @@ import re
 import warnings
 
 import numpy as np
-from brpylib import NevFile
+from brpylib import NevFile, NsxFile
 
-from brpylib.brpylib import *
 from struct import unpack
 
 import pandas as pd
@@ -205,7 +204,7 @@ def get_nev_rec_start(nev_file):
         else:
             continue  # Keep looking for the recording event packer
     else:
-        recording_start = 0  # We didn't find any recording start packets
+        recording_start = None  # We didn't find any recording start packets
 
     return recording_start
 
