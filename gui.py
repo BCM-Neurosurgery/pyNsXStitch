@@ -166,6 +166,7 @@ def load_dir_async(gui):
         first_nev = NevFile(gui.streamed_files['NeV'][0])
         gui.nev_start = get_nev_rec_start(first_nev)
         gui.ts_freq = first_nev.basic_header['TimeStampResolution']
+        gui.time_origin = first_nev.basic_header['TimeOrigin']
         cleaned_df = pd.DataFrame.from_dict({
             'Timestamp': timestamps,
             'Time Elapsed': np.round((timestamps - gui.nev_start) / gui.ts_freq, 2),
@@ -176,7 +177,7 @@ def load_dir_async(gui):
         gui.full_comment_df = cleaned_df
         gui.notify('Finished loading comments. ')
         gui.reset_comments()
-        gui.notify(f'Ready for time selection...\n')
+        gui.notify('Ready for time selection...\n')
         gui.update_progressbar(-1)
     except Exception as e:
         gui.disp_error(*sys.exc_info())
@@ -196,8 +197,10 @@ class StitcherGUI(object):
         self.output_dir = tk.StringVar(self.root, value=None)
         self.search_text = tk.StringVar(self.root, value='')
         self.file_name = tk.StringVar(self.root, value='stitched')
-        self.start_time = tk.DoubleVar(master=self.root, value=None)
-        self.end_time = tk.DoubleVar(master=self.root, value=None)
+        self.start_elapsed = tk.DoubleVar(master=self.root, value=0.0)
+        self.end_elapsed = tk.DoubleVar(master=self.root, value=0.0)
+        self.start_wall_clock = tk.StringVar(master=self.root, value='')
+        self.end_wall_clock = tk.StringVar(master=self.root, value='')
         self.start_timestamp = tk.IntVar(master=self.root, value=None)
         self.end_timestamp = tk.IntVar(master=self.root, value=None)
         self.patient_id = tk.StringVar(master=self.root, value=None)
@@ -209,6 +212,7 @@ class StitcherGUI(object):
         self.streamed_files = None
         self.ts_freq = None
         self.nev_start = None
+        self.time_origin = None
         self.custom_name = None
 
         # Additional GUI elements
@@ -221,6 +225,11 @@ class StitcherGUI(object):
         self.progressbar = None
         self.progress_fill = None
         self.progress_bg = None
+        self._rebuilding = False
+        self._resize_after = None
+        self._last_window_width = None
+        self._start_source = None   # None until user types; 'elapsed' or 'wall_clock' after
+        self._end_source = None
 
         self.build_gui()
 
@@ -252,9 +261,10 @@ class StitcherGUI(object):
         top_row = self.build_top_row()
         top_row.pack(side=tk.TOP, anchor=tk.W)
         mid_row = self.build_mid_row()
-        mid_row.pack(side=tk.TOP, anchor=tk.W)
+        mid_row.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         bot_row = self.build_bot_row()
         bot_row.pack(side=tk.TOP, anchor=tk.W)
+        self.root.bind('<Configure>', self._on_table_resize)
 
     def build_top_row(self):
         top_row_frame = tk.Frame(master=self.root)
@@ -296,10 +306,10 @@ class StitcherGUI(object):
     def build_mid_row(self):
         middle_row = tk.Frame(master=self.root, pady=20)
 
-        time_select = self.build_time_select(middle_row)
-        time_select.pack(side=tk.LEFT, anchor=tk.N,)
         info_column = self.build_info_column(middle_row)
-        info_column.pack(side=tk.RIGHT, anchor=tk.N)
+        info_column.pack(side=tk.RIGHT, anchor=tk.N, padx=(0, 10))
+        time_select = self.build_time_select(middle_row)
+        time_select.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         return middle_row
 
@@ -337,25 +347,65 @@ class StitcherGUI(object):
         self.time_frame = tk.Frame(master=parent)
 
         # Build all the controls on the left side of the time select frame
-        inputs = tk.Frame(master=self.time_frame, width=50, padx=10)
-        tk.Label(master=inputs, text="Comment Search", ).pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
-        tk.Entry(master=inputs, textvariable=self.search_text).pack(side=tk.TOP)
+        ENTRY_W = 26
+        HALF_W  = int(round(ENTRY_W / 2))
+        inputs = tk.Frame(master=self.time_frame, padx=10)
+        tk.Label(master=inputs, text="Comment Search").pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
+        tk.Entry(master=inputs, textvariable=self.search_text, width=ENTRY_W).pack(side=tk.TOP)
         buttons = tk.Frame(master=inputs)
         tk.Button(master=buttons, text='Search', command=self.search_comments).pack(side=tk.RIGHT, anchor=tk.N)
         tk.Button(master=buttons, text='Reset', command=self.reset_comments).pack(side=tk.RIGHT, anchor=tk.N)
         buttons.pack(side=tk.TOP, anchor=tk.E)
 
+        # --- Start time ---
         tk.Label(master=inputs, text="Start Time").pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
-        tk.Entry(master=inputs, textvariable=self.start_time).pack(side=tk.TOP)
-        tk.Label(master=inputs, text="End Time").pack(side=tk.TOP, anchor=tk.W)
-        tk.Entry(master=inputs, textvariable=self.end_time).pack(side=tk.TOP)
+        start_pair = tk.Frame(master=inputs)
+        start_e_col = tk.Frame(master=start_pair)
+        tk.Label(master=start_e_col, text="(Elapsed)").pack(side=tk.TOP, anchor=tk.W)
+        start_elapsed_entry = tk.Entry(master=start_e_col, textvariable=self.start_elapsed, width=HALF_W)
+        start_elapsed_entry.pack(side=tk.TOP)
+        start_elapsed_entry.bind('<KeyRelease>', lambda e: setattr(self, '_start_source', 'elapsed'))
+        start_elapsed_entry.bind('<FocusOut>', lambda e: self.sync_elapsed_to_wall_clock(self.start_elapsed, self.start_wall_clock))
+        start_elapsed_entry.bind('<Return>', lambda e: self.update_tlims())
+        start_e_col.pack(side=tk.LEFT)
+        start_w_col = tk.Frame(master=start_pair)
+        tk.Label(master=start_w_col, text="(Wall Clock)").pack(side=tk.TOP, anchor=tk.W)
+        start_wall_entry = tk.Entry(master=start_w_col, textvariable=self.start_wall_clock, width=HALF_W)
+        start_wall_entry.pack(side=tk.TOP)
+        start_wall_entry.bind('<KeyRelease>', lambda e: setattr(self, '_start_source', 'wall_clock'))
+        start_wall_entry.bind('<FocusOut>', lambda e: self.sync_wall_clock_to_elapsed(self.start_wall_clock, self.start_elapsed))
+        start_wall_entry.bind('<Return>', lambda e: self.update_tlims())
+        start_w_col.pack(side=tk.LEFT, padx=(4, 0))
+        start_pair.pack(side=tk.TOP, anchor=tk.W)
+
+        # --- End time ---
+        tk.Label(master=inputs, text="End Time").pack(side=tk.TOP, anchor=tk.W, pady=(10, 0))
+        end_pair = tk.Frame(master=inputs)
+        end_e_col = tk.Frame(master=end_pair)
+        tk.Label(master=end_e_col, text="(Elapsed)").pack(side=tk.TOP, anchor=tk.W)
+        end_elapsed_entry = tk.Entry(master=end_e_col, textvariable=self.end_elapsed, width=HALF_W)
+        end_elapsed_entry.pack(side=tk.TOP)
+        end_elapsed_entry.bind('<KeyRelease>', lambda e: setattr(self, '_end_source', 'elapsed'))
+        end_elapsed_entry.bind('<FocusOut>', lambda e: self.sync_elapsed_to_wall_clock(self.end_elapsed, self.end_wall_clock))
+        end_elapsed_entry.bind('<Return>', lambda e: self.update_tlims())
+        end_e_col.pack(side=tk.LEFT)
+        end_w_col = tk.Frame(master=end_pair)
+        tk.Label(master=end_w_col, text="(Wall Clock)").pack(side=tk.TOP, anchor=tk.W)
+        end_wall_entry = tk.Entry(master=end_w_col, textvariable=self.end_wall_clock, width=HALF_W)
+        end_wall_entry.pack(side=tk.TOP)
+        end_wall_entry.bind('<KeyRelease>', lambda e: setattr(self, '_end_source', 'wall_clock'))
+        end_wall_entry.bind('<FocusOut>', lambda e: self.sync_wall_clock_to_elapsed(self.end_wall_clock, self.end_elapsed))
+        end_wall_entry.bind('<Return>', lambda e: self.update_tlims())
+        end_w_col.pack(side=tk.LEFT, padx=(4, 0))
+        end_pair.pack(side=tk.TOP, anchor=tk.W)
+
         buttons = tk.Frame(master=inputs)
         tk.Button(master=buttons, text='Update', command=self.update_tlims).pack(side=tk.RIGHT, anchor=tk.N)
         tk.Button(master=buttons, text='Reset', command=self.reset_tlims).pack(side=tk.RIGHT, anchor=tk.N)
         buttons.pack(side=tk.TOP, anchor=tk.E)
 
         tk.Label(master=inputs, text="Output Name").pack(side=tk.TOP, anchor=tk.W, pady=(20, 0))
-        tk.Entry(master=inputs, textvariable=self.file_name).pack(side=tk.TOP)
+        tk.Entry(master=inputs, textvariable=self.file_name, width=ENTRY_W).pack(side=tk.TOP)
         buttons = tk.Frame(master=inputs)
         tk.Button(master=buttons, text='Remember', command=self.set_name).pack(side=tk.RIGHT, anchor=tk.N)
         tk.Button(master=buttons, text='Reset', command=self.reset_name).pack(side=tk.RIGHT, anchor=tk.N)
@@ -365,7 +415,7 @@ class StitcherGUI(object):
         stitch = tk.Checkbutton(master=inputs, text='Aggressive Stitch', variable=self.aggressive_stitch)
         stitch.pack(side=tk.TOP, anchor=tk.E)
 
-        inputs.pack(side=tk.LEFT, anchor=tk.N)
+        inputs.pack(side=tk.LEFT, anchor=tk.N, fill=tk.Y)
 
         self.reset_comments()
 
@@ -415,7 +465,7 @@ class StitcherGUI(object):
             row_color = 'palegreen'
         elif self.end_timestamp.get() == row_ts:
             row_color = 'lightcoral'
-        elif self.start_timestamp.get() < row_ts < self.end_timestamp.get():
+        elif 0 < self.start_timestamp.get() < row_ts < self.end_timestamp.get():
             row_color = ['SkyBlue1', 'SteelBlue1'][row_idx % 2]
         return row_color
 
@@ -428,35 +478,46 @@ class StitcherGUI(object):
             self.table_area.yview_scroll(scroll, "units")
 
     def build_comment_table(self):
-        col_widths = [90, 90, 300, 200, 30, 30]
-        col_starts = [10, 100, 190, 490, 690, 720]
+        # Fixed columns left of Comment, and right of Comment
+        LEFT_W = 190   # Timestamp (90) + Time Elapsed (90) + 10px left margin
+        RIGHT_W = 260  # File Name (200) + Start (30) + Stop (30)
+        MIN_COMMENT_W = 100
+
+        avail = self.comment_frame.winfo_width()
+        comment_col_w = max(avail - LEFT_W - RIGHT_W, MIN_COMMENT_W) if avail > 1 else 300
+
+        fname_x = LEFT_W + comment_col_w
+        start_x = fname_x + 200
+        stop_x  = start_x + 30
+
+        col_widths = [90, 90, comment_col_w, 200, 30, 30]
+        col_starts = [10, 100, LEFT_W, fname_x, start_x, stop_x]
 
         headers = ['Timestamp', 'Time Elapsed', 'Comment', 'File Name', 'Start', 'Stop']
 
         row_height = 35
-        canvas_width = col_starts[-1] + col_widths[-1]
+        canvas_width = stop_x + 30
         canvas_height = row_height * (1 + len(self.comment_df))
 
         # Build headers:
         header_frame = tk.Frame(self.comment_frame)
         header_frame.pack(side=tk.TOP, fill=tk.X)
 
-        # Create a Canvas for header labels
-        header_canvas = tk.Canvas(header_frame, width=canvas_width, height=row_height)
-        header_canvas.pack(side=tk.LEFT, fill=tk.X)
+        header_canvas = tk.Canvas(header_frame, height=row_height)
+        header_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         for i, col in enumerate(headers):
             header_canvas.create_text(col_starts[i], row_height // 4, text=col, anchor='nw')
 
         # Create a vertical scrollbar and pack to the right of the comment frame
-        self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL) 
+        self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL)
         self.scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.table_area = tk.Canvas(
             self.comment_frame,
-            scrollregion=(0, 0, canvas_width, canvas_height),  # Set scrollable region
-            width=canvas_width, height=500 - row_height,
-            yscrollcommand=self.scroll.set  # Link canvas to vertical scrollbar
+            scrollregion=(0, 0, canvas_width, canvas_height),
+            height=500 - row_height,
+            yscrollcommand=self.scroll.set
         )
 
         self.table_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -510,9 +571,6 @@ class StitcherGUI(object):
 
             self.table_elements.append(row_items)
 
-        self.table_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
     def recolor_table(self):
         """Update the colors of the rows in the comment table without re-building"""
         for rox_idx, row_elements in enumerate(self.table_elements):
@@ -526,31 +584,113 @@ class StitcherGUI(object):
             self.error('WARNING: The start timestamp is greater than the end timestamp!\n'
                        '  This will result in no data being selected')
 
+    def elapsed_to_wall_clock_str(self, elapsed):
+        """Convert elapsed seconds since recording start to a HH:MM:SS.ss wall clock string."""
+        from datetime import timedelta
+        wall_dt = self.time_origin + timedelta(seconds=float(elapsed))
+        return wall_dt.strftime('%H:%M:%S.') + f'{wall_dt.microsecond // 10000:02d}'
+
+    def sync_elapsed_to_wall_clock(self, var_elapsed, var_wall_clock, event=None):
+        """Update the wall clock field from the elapsed field."""
+        if self.time_origin is None:
+            return
+        try:
+            self.var_wall_clock = var_wall_clock  # suppress linter; used via arg
+            var_wall_clock.set(self.elapsed_to_wall_clock_str(float(var_elapsed.get())))
+        except (ValueError, TypeError):
+            pass
+
+    def sync_wall_clock_to_elapsed(self, var_wall_clock, var_elapsed, event=None):
+        """Update the elapsed field from the wall clock field."""
+        if self.time_origin is None:
+            return
+        elapsed = self.parse_wall_clock(var_wall_clock.get())
+        if elapsed is not None:
+            var_elapsed.set(round(elapsed, 4))
+
+    def parse_wall_clock(self, text):
+        """Parse HH:MM:SS.ss wall clock text. Returns elapsed seconds since recording start, or None."""
+        for fmt in ('%H:%M:%S.%f', '%H:%M:%S', '%H:%M'):
+            try:
+                parsed = datetime.strptime(text.strip(), fmt)
+                entered_dt = self.time_origin.replace(
+                    hour=parsed.hour, minute=parsed.minute,
+                    second=parsed.second, microsecond=parsed.microsecond
+                )
+                elapsed = (entered_dt - self.time_origin).total_seconds()
+                if elapsed < 0:
+                    elapsed += 86400  # handle midnight crossing
+                return elapsed
+            except ValueError:
+                continue
+        self.error(f'Could not parse wall clock input: "{text}"\n'
+                   f'  Expected HH:MM, HH:MM:SS, or HH:MM:SS.ss (e.g. 19:00)')
+        return None
+
+    def parse_elapsed(self, text):
+        """Parse elapsed seconds text. Returns float, or None on failure."""
+        try:
+            return float(text)
+        except ValueError:
+            self.error(f'Could not parse elapsed time input: "{text}"\n'
+                       f'  Expected elapsed seconds (e.g. 123.45)')
+            return None
+
     def update_ts_lims(self):
         """Update the displayed values in the time range entry based on comment selection"""
         ts_lims = np.array([self.start_timestamp.get(), self.end_timestamp.get()])
-        time_lims = (ts_lims - self.nev_start) / self.ts_freq
-        self.start_time.set(np.round(time_lims[0], 4))
-        self.end_time.set(np.round(time_lims[1], 4))
+        time_lims = np.round((ts_lims - self.nev_start) / self.ts_freq, 4)
+        self.start_elapsed.set(time_lims[0])
+        self.end_elapsed.set(time_lims[1])
+        self.start_wall_clock.set(self.elapsed_to_wall_clock_str(time_lims[0]))
+        self.end_wall_clock.set(self.elapsed_to_wall_clock_str(time_lims[1]))
+
+        if not self.full_comment_df.empty:
+            max_elapsed = (self.full_comment_df['Timestamp'].max() - self.nev_start) / self.ts_freq
+            if time_lims[1] > max_elapsed:
+                self.warn(f'End time ({round(float(time_lims[1]), 1)}s) is past the last comment '
+                          f'({round(float(max_elapsed), 1)}s). All data after the start time will be stitched.')
 
         self.auto_set_name()
         self.recolor_table()
+
+    def _resolve_elapsed(self, elapsed_var, wall_var, source):
+        """Return elapsed seconds from whichever field the user last edited, or None on parse failure."""
+        if source == 'wall_clock':
+            return self.parse_wall_clock(wall_var.get())  # logs error and returns None on failure
+        return elapsed_var.get()
 
     def update_tlims(self):
-        """Find the narrowest pair of timestamps that contain the time limits in seconds"""
-        time_lims = np.array([self.start_time.get(), self.end_time.get()])
-        approx_ts_lims = (time_lims * self.ts_freq) + self.nev_start
-        self.start_timestamp.set(np.floor(approx_ts_lims[0]))
-        self.end_timestamp.set(np.ceil(approx_ts_lims[1]))
+        """Apply manually-entered time fields to the internal Blackrock timestamps.
+        Only updates whichever bound(s) the user has typed into since the last update."""
+        updated = False
 
-        self.recolor_table()
-        self.auto_set_name()
+        if self._start_source is not None:
+            start_s = self._resolve_elapsed(self.start_elapsed, self.start_wall_clock, self._start_source)
+            if start_s is not None:
+                self.start_timestamp.set(int(np.floor(start_s * self.ts_freq + self.nev_start)))
+                self._start_source = None
+                updated = True
+
+        if self._end_source is not None:
+            end_s = self._resolve_elapsed(self.end_elapsed, self.end_wall_clock, self._end_source)
+            if end_s is not None:
+                self.end_timestamp.set(int(np.ceil(end_s * self.ts_freq + self.nev_start)))
+                self._end_source = None
+                updated = True
+
+        if updated:
+            self.update_ts_lims()
 
     def reset_tlims(self):
         self.start_timestamp.set(0)
         self.end_timestamp.set(0)
-        self.start_time.set(0.0)
-        self.end_time.set(0.0)
+        self.start_elapsed.set(0.0)
+        self.end_elapsed.set(0.0)
+        self.start_wall_clock.set('')
+        self.end_wall_clock.set('')
+        self._start_source = None
+        self._end_source = None
         self.recolor_table()
 
     def search_comments(self):
@@ -568,19 +708,36 @@ class StitcherGUI(object):
         self.comment_df = self.full_comment_df
         self.rebuild_comments()
 
+    def _on_table_resize(self, event):
+        if event.widget is not self.root:
+            return
+        if self._rebuilding:
+            return
+        if event.width == self._last_window_width:
+            return
+        self._last_window_width = event.width
+        if self._resize_after:
+            self.root.after_cancel(self._resize_after)
+        self._resize_after = self.root.after(300, self.rebuild_comments)
+
     def rebuild_comments(self):
         """Build the comment dataframe section of the GUI from scratch"""
-        if self.comment_frame:
-            self.table_elements = []
-            self.comment_frame.destroy()
+        self._rebuilding = True
+        self._resize_after = None
+        try:
+            if self.comment_frame:
+                self.table_elements = []
+                self.comment_frame.destroy()
 
-        self.comment_frame = tk.Frame(master=self.time_frame)
-        self.comment_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            self.comment_frame = tk.Frame(master=self.time_frame)
+            self.comment_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL, background='white')
-        self.build_comment_table()
+            self.scroll = tk.Scrollbar(self.comment_frame, orient=tk.VERTICAL, background='white')
+            self.build_comment_table()
 
-        self.notify(f'Showing {len(self.comment_df)} matching comments')
+            self.notify(f'Showing {len(self.comment_df)} matching comments')
+        finally:
+            self._rebuilding = False
 
     def load_dir(self):
         """Load all the NeV comments into memory, trigger populating the comment frame"""
