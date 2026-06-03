@@ -1,16 +1,19 @@
 """
-Based on
+Utility and Helper functions to help with common stitching tasks
 """
 
 import os
 import re
 import warnings
 
-from brpylib.brpylib import *
+import numpy as np
+from brpylib import NevFile, NsxFile
+
 from struct import unpack
 
 import pandas as pd
 
+from pyNsXStitch.stitchers import StitchedNeVFile, StitchedNsXFile
 from pyNsXStitch.streamers import stream_nev_packets, iter_nsx_timestamps
 
 nsx_copy_headers = []
@@ -204,7 +207,7 @@ def get_nev_rec_start(nev_file):
         else:
             continue  # Keep looking for the recording event packer
     else:
-        recording_start = 0  # We didn't find any recording start packets
+        recording_start = None  # We didn't find any recording start packets
 
     return recording_start
 
@@ -222,3 +225,73 @@ def read_at(filepath, read_loc, n_bytes=10):
     return read
 
 
+def load_comments_in_folder(source_dir):
+    """
+    Load all comments from all NeV files in the given folder as a pandas dataframe
+    """
+
+    # With the new version of central, data from multiple NSPs can be in the same folder
+    all_streamed_files = get_all_streamed_files(source_dir, full_paths=True)
+    # Sort the NSPs for consistency
+    all_nsps = sorted(all_streamed_files)
+
+    if len(all_nsps) == 1:
+        # Only 1 NSP here, so we can move forward
+        nsp = all_nsps[0]
+        streamed_files = all_streamed_files[nsp]
+    else:
+        raise ValueError(f'ERROR! Invalid NSP config: {source_dir}')
+
+    first_nsp = list(streamed_files.keys())[0]
+    print(f'Using comments from {first_nsp}')
+    print(f'Found {len(streamed_files["NeV"])} NeV files')
+
+    # Iter through all the comment packets in all files
+    print(f'Loading comments from NeV...')
+    timestamps, comments, file_names = [], [], []
+    n_files = len(streamed_files["NeV"])
+    for i, file in enumerate(streamed_files["NeV"]):
+        nev = NevFile(file)
+        for (ts, packet_id), raw_data in stream_nev_packets(nev, packet_type=65535):
+            timestamps.append(ts)
+            text_data = raw_data[6:]
+            comment = text_data.decode('ASCII').rstrip('\x00')  # TODO: handle other charsets
+            comments.append(comment)
+
+    print(f'Found {len(timestamps)} comments...')
+
+    # Convert to a dataframe for drawing to the GUI
+    timestamps = np.array(timestamps)
+    cleaned_df = pd.DataFrame.from_dict({
+        'Timestamp': timestamps,
+        'Comment': comments
+    })
+    return streamed_files, cleaned_df
+
+
+def stitch_one_task(streamed_files, output_dir, task_name, start, end, aggressive=False):
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Stitch the NeV files first
+    print('Stitching NeV files...')
+    nev_stitch = StitchedNeVFile(streamed_files['NeV'], start, end)
+    with open(os.path.join(output_dir, f'{task_name}.nev'), 'wb') as nev_out:
+        nev_stitch.write(nev_out)
+    print('Stitched NeV file complete')
+
+    # Stitch each of the NsX filetypes
+    print('Beginning NsX stitching...')
+    nsx_files = {filetype: files for filetype, files in streamed_files.items() if 'ns' in filetype.lower()}
+    for filetype, files in nsx_files.items():
+        print(f'Stitching from {len(files)} {filetype} files')
+        in_range = find_nsx_in_range(files, start, end)
+        print(f'Found {len(in_range)} files in the selected time range')
+        if in_range:
+            nsx_stitch = StitchedNsXFile(in_range, start, end, aggressive_concat=aggressive)
+            with open(os.path.join(output_dir, f'{task_name}.{filetype.lower()}'), 'wb+') as nsx_out:
+                nsx_stitch.write(nsx_out)
+        else:
+            raise IndexError('Could not find enough files to stitch!')
+
+    print(f'Finished {task_name}')

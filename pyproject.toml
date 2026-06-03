@@ -1,0 +1,26 @@
+[project]
+name = "pyNsXStitch"
+version = "0.1.5"
+description = "Package to stitch blackrock toc mode recording files"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    { name = "Tomasz Fraczek", email = "tomek.fraczek@bcm.edu" }
+]
+keywords = ["Blackrock", "stitching"]
+dependencies = [
+    "numpy",
+    "pandas",
+    "brpylib @ git+https://github.com/BCM-Neurosurgery/Blackrock-Python-Utilities.git@main",
+]
+
+[project.optional-dependencies]
+jupyter = ["jupyter"]
+
+[project.urls]
+Repository = "https://github.com/BCM-Neurosurgery/pyNsXStitch"
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
