@@ -1,5 +1,5 @@
 """
-Based on
+Utility and Helper functions to help with common stitching tasks
 """
 
 import os
