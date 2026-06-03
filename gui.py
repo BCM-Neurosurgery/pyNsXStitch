@@ -293,7 +293,9 @@ class StitcherGUI(object):
     def build_directory_select(parent, label, variable, label_width=20, button_width=15, box_width=100):
         """Build a little widget to select a directory on the filesystem"""
         def browse_cmd():
-            selected = filedialog.askdirectory(initialdir="/", mustexist=True)
+            current = variable.get()
+            start_dir = current if current and os.path.isdir(current) else "/"
+            selected = filedialog.askdirectory(initialdir=start_dir, mustexist=True)
             variable.set(selected)
 
         source_label = tk.Label(master=parent, text=label, width=label_width)
