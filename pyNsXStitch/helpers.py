@@ -9,7 +9,7 @@ import warnings
 import numpy as np
 from brpylib import NevFile, NsxFile
 
-from struct import unpack
+from struct import pack, unpack
 
 import pandas as pd
 
@@ -266,6 +266,34 @@ def load_comments_in_folder(source_dir):
     return streamed_files, cleaned_df
 
 
+def write_one_nev_file(nev_file: NevFile, output_path: str):
+    """
+    Write an in-memory NevFile object (from brpylib.py) out to disk as a standalone .nev file.
+
+    Copies the header verbatim, then re-writes every data packet found by stream_nev_packets.
+
+    :param nev_file: NevFile object (defined in brpylib.py) to write out
+    :param output_path: Path of the .nev file to write
+    """
+    with open(output_path, 'wb') as out_file:
+        # Copy the header from the origin file
+        nev_file.datafile.seek(0, 0)
+        out_file.seek(0, 0)
+        header_size = nev_file.basic_header['BytesInHeader']
+        out_file.write(nev_file.datafile.read(header_size))
+
+        # Write all the data packets in order
+        for (timestamp, packet_id), packet in stream_nev_packets(nev_file):
+            out_file.write(pack('<Q', timestamp))
+            out_file.write(pack('<H', packet_id))
+            out_file.write(packet)
+
+def write_one_nsx_file(nsx_file: NsxFile, output_path: str, **kwargs):
+    """
+    Minimal wrapper around NsX File's writesubsetnsx for sake of nicety
+    """
+    nsx_file.savesubsetnsx(out_file=output_path, **kwargs)
+
 def stitch_one_task(streamed_files, output_dir, task_name, start, end, aggressive=False):
 
     os.makedirs(output_dir, exist_ok=True)
@@ -292,3 +320,4 @@ def stitch_one_task(streamed_files, output_dir, task_name, start, end, aggressiv
             raise IndexError('Could not find enough files to stitch!')
 
     print(f'Finished {task_name}')
+
