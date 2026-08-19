@@ -1,3 +1,11 @@
+"""
+Collection of functions to help with anonymizing files (aka stripping PHI)
+
+None of these are a guarantee that all PHI has been removed! It is the responsibility of the user to ensure that no
+ elements of PHI remain in the NeV or NsX files before sharing the data.
+"""
+
+
 import numpy as np
 import pandas as pd
 from brpylib import NsxFile, NevFile
@@ -62,7 +70,11 @@ def nev_anonymize(nev_file: NevFile, output_filename: str):
     """
     Wrapper to apply several of the commonly used anonymization functions to an NeV file
 
+    Currently, this focuses on:
+        - Obfuscating UTC date in the TimeOrigin header
+
     This is not a guarantee that all PHI is removed, and you should review the data yourself
+    In particular, comments in the NeV file could contain PHI!
     """
 
     no_dates_nev = remove_dates_nev(nev_file)
@@ -70,7 +82,15 @@ def nev_anonymize(nev_file: NevFile, output_filename: str):
 
 
 def nsx_anonymize(nsx_file: NsxFile, output_filename: str):
+    """
+    Wrapper to apply several of the commonly used anonymization functions to an NeV file
 
+    Currently, this focuses on:
+        - Obfuscating UTC date in the TimeOrigin header
+        - Removing (zero-ing out) the room audio/mic
+
+    This is not a guarantee that all PHI is removed, and you should review the data yourself
+    """
     no_dates_nsx = remove_dates_nsx(nsx_file)
     remove_audio_nsx(no_dates_nsx, output_filename) # This also writes the file
 
