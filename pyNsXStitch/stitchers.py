@@ -1,12 +1,13 @@
+from datetime import datetime, timedelta
+from itertools import chain
 from struct import unpack, pack
 
 import numpy as np
-from datetime import datetime
 from brpylib import NsxFile, NevFile
 from brpylib.brpylib import ELEC_ID_DEF, check_elecid, check_dataelecid, NSX_BASIC_HEADER_BYTES_22, \
     NSX_EXT_HEADER_BYTES_22
 
-from pyNsXStitch.streamers import stream_nev_packets, stream_nsx_data
+from pyNsXStitch.streamers import iter_nsx_timestamps, stream_nev_packets, stream_nsx_data
 
 
 class StitchedNeVFile(object):
@@ -84,6 +85,7 @@ class StitchedNeVFile(object):
 class StitchedNsXFile(object):
 
     max_packet_len = 2**32-1
+    time_origin_loc = 8 + 2 + 4 + 16 + 256 + 4 + 4
 
     def __init__(self, files_to_stitch, start=None, end=None, aggressive_concat=False):
 
@@ -112,41 +114,74 @@ class StitchedNsXFile(object):
                 if gui_updater is not None and meta is not None and duration is not None:
                     elapsed = meta[0] - self.start_timestamp
                     gui_updater(100 * elapsed / duration)
-                if meta is not None:
-                    pass
                 yield meta, data_block
+            nsx_file.datafile.close()
 
-    def write_headers(self, out_file):
+    def write_headers(self, out_file, first_timestamp=None):
 
         # Load an NsX file to pull headers from
         origin = NsxFile(self.files[0], verbose=False, interactive=False)
-        origin.datafile.seek(0, 0)
+        try:
+            # Verify that the NsX file is written in the supported format
+            if origin.basic_header['FileTypeID'] != 'BRSMPGRP':
+                type_here = origin.basic_header['FileTypeID']
+                raise TypeError(f'Only BRSMPGRP type NsX files are currently supported! (found {type_here})')
 
-        # Verify that the NsX file is written in the supported format
-        if origin.basic_header['FileTypeID'] != 'BRSMPGRP':
-            type_here = origin.basic_header['FileTypeID']
-            raise TypeError(f'Only BRSMPGRP type NsX files are currently supported! (found {type_here})')
+            bytes_in_headers = origin.basic_header['BytesInHeader']
+            origin.datafile.seek(0, 0)
+            headers = bytearray(origin.datafile.read(bytes_in_headers))
 
-        # Make sure we're writing to hte very start of the new file
-        out_file.seek(0, 0)
+            if first_timestamp is not None:
+                origin_timestamp, _ = next(iter_nsx_timestamps(origin))
+                timestamp_resolution = origin.basic_header['TimeStampResolution']
+                # Keep packet timestamps on the global NSP clock while moving the
+                # copied file origin to the first sample in the stitched output.
+                timestamp_offset = first_timestamp - origin_timestamp
+                time_origin = origin.basic_header['TimeOrigin'] + timedelta(
+                    seconds=timestamp_offset / timestamp_resolution
+                )
+                headers[self.time_origin_loc:self.time_origin_loc + 16] = pack(
+                    '<8H',
+                    time_origin.year,
+                    time_origin.month,
+                    (time_origin.weekday() + 1) % 7,
+                    time_origin.day,
+                    time_origin.hour,
+                    time_origin.minute,
+                    time_origin.second,
+                    time_origin.microsecond // 1000,
+                )
 
-        # Copy over the headers
-        bytes_in_headers = origin.basic_header['BytesInHeader']
-        out_file.write(origin.datafile.read(bytes_in_headers))
+            out_file.seek(0, 0)
+            out_file.write(headers)
 
-        sample_rate = (origin.basic_header['SampleResolution'] / origin.basic_header['Period'])
-        ts_freq = origin.basic_header['TimeStampResolution']
-        return ts_freq / sample_rate
+            sample_rate = (origin.basic_header['SampleResolution'] / origin.basic_header['Period'])
+            ts_freq = origin.basic_header['TimeStampResolution']
+            return ts_freq / sample_rate
+        finally:
+            origin.datafile.close()
 
     def write(self, out_file, gui_updater=None):
 
-        ts_per_sample = self.write_headers(out_file)
+        data = iter(self.iter_data(gui_updater=gui_updater))
+        try:
+            first_item = next(data)
+        except StopIteration:
+            first_item = None
+
+        first_timestamp = (
+            first_item[0][0]
+            if first_item is not None and first_item[0] is not None
+            else None
+        )
+        ts_per_sample = self.write_headers(out_file, first_timestamp=first_timestamp)
 
         prev_loop_t = datetime.now()
         durations = []
         last_ts = None
         prev_n_points_loc = None
-        for meta, data_block in self.iter_data(gui_updater=gui_updater):
+        items = chain((first_item,), data) if first_item is not None else ()
+        for meta, data_block in items:
 
             # Data blocks at the start of a packet have timestamps. Write them back at start
             if meta is not None:
