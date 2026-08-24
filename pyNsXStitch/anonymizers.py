@@ -66,7 +66,7 @@ def remove_dates_nsx(nsx_file: NsxFile, output_filename: str|None = None, date_o
     return nsx_file
 
 
-def nev_anonymize(nev_file: NevFile, output_filename: str):
+def nev_anonymize(nev_file: NevFile, output_filename: str, date_offset: pd.Timedelta|None =None):
     """
     Wrapper to apply several of the commonly used anonymization functions to an NeV file
 
@@ -75,13 +75,17 @@ def nev_anonymize(nev_file: NevFile, output_filename: str):
 
     This is not a guarantee that all PHI is removed, and you should review the data yourself
     In particular, comments in the NeV file could contain PHI!
+
+    :param nev_file: NeV file object pointing to the particualr NeV file we want to anonymize
+    :param output_filename: full path to the destination of where we want to place the anonymized file
+    :param date_offset, optional: time offset to apply to the NeV file, otherwise a random offset will be chosen
     """
 
-    no_dates_nev = remove_dates_nev(nev_file)
+    no_dates_nev = remove_dates_nev(nev_file, date_offset=date_offset)
     write_one_nev_file(no_dates_nev, output_filename)
 
 
-def nsx_anonymize(nsx_file: NsxFile, output_filename: str):
+def nsx_anonymize(nsx_file: NsxFile, output_filename: str, date_offset: pd.Timedelta|None =None):
     """
     Wrapper to apply several of the commonly used anonymization functions to an NeV file
 
@@ -90,8 +94,12 @@ def nsx_anonymize(nsx_file: NsxFile, output_filename: str):
         - Removing (zero-ing out) the room audio/mic
 
     This is not a guarantee that all PHI is removed, and you should review the data yourself
+
+    :param nsx_file: NSX file object pointing to the particualr NeV file we want to anonymize
+    :param output_filename: full path to the destination of where we want to place the anonymized file
+    :param date_offset, optional: time offset to apply to the NSX file, otherwise a random offset will be chosen
     """
-    no_dates_nsx = remove_dates_nsx(nsx_file)
+    no_dates_nsx = remove_dates_nsx(nsx_file, date_offset=date_offset)
     remove_audio_nsx(no_dates_nsx, output_filename) # This also writes the file
 
 
