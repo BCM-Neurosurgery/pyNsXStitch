@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from itertools import chain
-from struct import unpack, pack
+from struct import calcsize, unpack, pack
 
 import numpy as np
 from brpylib import NsxFile, NevFile
@@ -85,7 +85,10 @@ class StitchedNeVFile(object):
 class StitchedNsXFile(object):
 
     max_packet_len = 2**32-1
-    time_origin_loc = 8 + 2 + 4 + 16 + 256 + 4 + 4
+    # NSx 2.2+ basic-header fields before TimeOrigin: FileTypeID, FileSpec,
+    # BytesInHeader, Label, Comment, Period, and TimeStampResolution.
+    time_origin_loc = calcsize('<8s2BI16s256sII')
+    time_origin_size = calcsize('<8H')
 
     def __init__(self, files_to_stitch, start=None, end=None, aggressive_concat=False):
 
@@ -105,17 +108,19 @@ class StitchedNsXFile(object):
             else None
         for file_i, filename in enumerate(self.files):
             nsx_file = NsxFile(filename, verbose=False, interactive=False)
-            streamer = stream_nsx_data(
-                nsx_file,
-                read_start_ts=self.start_timestamp,
-                read_end_ts=self.end_timestamp
-            )
-            for meta, data_block in streamer:
-                if gui_updater is not None and meta is not None and duration is not None:
-                    elapsed = meta[0] - self.start_timestamp
-                    gui_updater(100 * elapsed / duration)
-                yield meta, data_block
-            nsx_file.datafile.close()
+            try:
+                streamer = stream_nsx_data(
+                    nsx_file,
+                    read_start_ts=self.start_timestamp,
+                    read_end_ts=self.end_timestamp
+                )
+                for meta, data_block in streamer:
+                    if gui_updater is not None and meta is not None and duration is not None:
+                        elapsed = meta[0] - self.start_timestamp
+                        gui_updater(100 * elapsed / duration)
+                    yield meta, data_block
+            finally:
+                nsx_file.datafile.close()
 
     def write_headers(self, out_file, first_timestamp=None):
 
@@ -132,15 +137,42 @@ class StitchedNsXFile(object):
             headers = bytearray(origin.datafile.read(bytes_in_headers))
 
             if first_timestamp is not None:
-                origin_timestamp, _ = next(iter_nsx_timestamps(origin))
+                time_origin_end = self.time_origin_loc + self.time_origin_size
+                if len(headers) < time_origin_end:
+                    raise ValueError(
+                        'NSx header is too short to contain the TimeOrigin field '
+                        f'(expected at least {time_origin_end} bytes, found {len(headers)})'
+                    )
+
+                origin_timestamp = next(
+                    (
+                        timestamp
+                        for timestamp, packet_points in iter_nsx_timestamps(origin)
+                        if packet_points > 0
+                    ),
+                    None,
+                )
+                if origin_timestamp is None:
+                    raise ValueError(
+                        'Cannot adjust TimeOrigin because the origin NSx file '
+                        'contains no non-empty data packets'
+                    )
+
                 timestamp_resolution = origin.basic_header['TimeStampResolution']
+                if timestamp_resolution <= 0:
+                    raise ValueError('NSx TimeStampResolution must be greater than zero')
+
                 # Keep packet timestamps on the global NSP clock while moving the
                 # copied file origin to the first sample in the stitched output.
                 timestamp_offset = first_timestamp - origin_timestamp
-                time_origin = origin.basic_header['TimeOrigin'] + timedelta(
-                    seconds=timestamp_offset / timestamp_resolution
+                # Avoid float rounding; on-disk TimeOrigin precision is milliseconds.
+                offset_microseconds = (
+                    timestamp_offset * 1_000_000 // timestamp_resolution
                 )
-                headers[self.time_origin_loc:self.time_origin_loc + 16] = pack(
+                time_origin = origin.basic_header['TimeOrigin'] + timedelta(
+                    microseconds=offset_microseconds
+                )
+                headers[self.time_origin_loc:time_origin_end] = pack(
                     '<8H',
                     time_origin.year,
                     time_origin.month,
