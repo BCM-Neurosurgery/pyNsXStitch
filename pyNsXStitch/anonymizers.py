@@ -11,9 +11,11 @@ import pandas as pd
 from brpylib import NsxFile, NevFile
 from helpers import write_one_nev_file, write_one_nsx_file
 
-AUDIO_CHAN_NAMES = [
+
+DEFAULT_AUDIO_CHAN_FRAG = [
     'mic',
-    'audio'
+    'audio',
+    'room'
 ]
 
 def random_date_offset():
@@ -32,12 +34,20 @@ def scramble_date(date, offset=None):
     return new_date.to_pydatetime()
 
 
-def remove_audio_nsx(nsx_file: NsxFile, output_filename: str):
-    """Room audio can contain snippets of conversation that make it PHI"""
+def remove_audio_nsx(nsx_file: NsxFile, output_filename: str, audio_channel_keys: list|None=None):
+    """
+    Room audio can contain snippets of conversation that make it PHI
+
+    :param nsx_file: NsxFile object pointing to the particular file
+    :param output_filename: full path to the destination of where we want to place the anonymized file
+    :param audio_channel_keys: list of audio channel name fragments to search for in channel names
+    """
     non_audio_channels = []
+    if audio_channel_keys is None:
+        audio_channel_keys = DEFAULT_AUDIO_CHAN_FRAG
     for i, metadata in enumerate(nsx_file.extended_headers):
-        for forbidden in AUDIO_CHAN_NAMES:
-            if forbidden in metadata['ElectrodeLabel']:
+        for forbidden in audio_channel_keys:
+            if forbidden.lower() in metadata['ElectrodeLabel'].lower():
                 print(f'Removing channel {metadata["ElectrodeLabel"]}')
                 break
         else:
