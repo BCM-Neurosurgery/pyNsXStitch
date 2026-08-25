@@ -4,8 +4,11 @@ Collection of functions to help with anonymizing files (aka stripping PHI)
 None of these are a guarantee that all PHI has been removed! It is the responsibility of the user to ensure that no
  elements of PHI remain in the NeV or NsX files before sharing the data.
 """
+import warnings
 
-
+import os
+import re
+import pathlib
 import numpy as np
 import pandas as pd
 from brpylib import NsxFile, NevFile
@@ -17,6 +20,8 @@ DEFAULT_AUDIO_CHAN_FRAG = [
     'audio',
     'room'
 ]
+BRK_DATE_RE = r'(\d{8}-\d{6})'
+BRK_FILENAME_RE = r'NSP(\d)-(\d{8}-\d{6})-(\d{3})\.(nev|ns\d)'
 
 def random_date_offset():
     """Create a random datetime offset +- 31 years"""
@@ -32,6 +37,41 @@ def scramble_date(date, offset=None):
         offset = random_date_offset()
     new_date = pd.Timestamp(date) + offset
     return new_date.to_pydatetime()
+
+def clean_dirname(full_dirname: str, date_offset: pd.Timedelta|None =None) -> str:
+    """
+
+    :param full_dirname:
+    :return:
+    """
+    parts = pathlib.Path(full_dirname).parts
+    clean_parts = []
+    for part in parts:
+        date_match = re.search(BRK_DATE_RE, part)
+        if date_match is not None:
+            date_str = date_match.group(1)
+            new_date_str = scramble_date(date_str, date_offset).strftime('%Y%m%d-%H%M%S')
+            clean_parts.append(part.replace(date_str, new_date_str))
+        else:
+            clean_parts.append(part)
+    clean_dirname = os.path.join(*parts)
+    return clean_dirname
+
+
+def clean_filename(full_filename: str, date_offset: pd.Timedelta|None =None) -> str:
+    """
+    Remove the datetime from the BRK file filename, assuming the default format
+    """
+    filename = os.path.basename(full_filename)
+    match = re.search(BRK_FILENAME_RE, filename)
+    if match is None:
+        warnings.warn(f'Could not parse filename {full_filename}. Assuming no date info is contained')
+        return full_filename
+    nsp, date_str, chunk, ext = match.groups()
+
+    new_date_str = scramble_date(date_str, date_offset).strftime('%Y%m%d-%H%M%S')
+    new_filename = f'NSP{nsp}-{new_date_str}-{chunk}.{ext}'
+    return os.path.join(os.path.dirname(full_filename), new_filename)
 
 
 def remove_audio_nsx(nsx_file: NsxFile, output_filename: str, audio_channel_keys: list|None=None):
