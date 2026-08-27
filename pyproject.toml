@@ -11,7 +11,7 @@ keywords = ["Blackrock", "stitching"]
 dependencies = [
     "numpy",
     "pandas",
-    "brpylib @ git+https://github.com/BCM-Neurosurgery/Blackrock-Python-Utilities.git@main",
+    "brpylib @ git+ssh://git@github.com/BCM-Neurosurgery/Blackrock-Python-Utilities.git@main",
 ]
 
 [project.optional-dependencies]
