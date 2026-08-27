@@ -12,7 +12,7 @@ import pathlib
 import numpy as np
 import pandas as pd
 from brpylib import NsxFile, NevFile
-from helpers import write_one_nev_file, write_one_nsx_file
+from pyNsXStitch.helpers import write_one_nev_file, write_one_nsx_file
 
 
 DEFAULT_AUDIO_CHAN_FRAG = [
@@ -22,6 +22,7 @@ DEFAULT_AUDIO_CHAN_FRAG = [
 ]
 BRK_DATE_RE = r'(\d{8}-\d{6})'
 BRK_FILENAME_RE = r'NSP(\d)-(\d{8}-\d{6})-(\d{3})\.(nev|ns\d)'
+
 
 def random_date_offset():
     """Create a random datetime offset +- 31 years"""
@@ -40,9 +41,11 @@ def scramble_date(date, offset=None):
 
 def clean_dirname(full_dirname: str, date_offset: pd.Timedelta|None =None) -> str:
     """
+    Scramble any ``YYYYMMDD-HHMMSS`` date stamp found in each component of a directory path.
 
-    :param full_dirname:
-    :return:
+    :param full_dirname: directory path to clean
+    :param date_offset: shared offset to apply (see scramble_date); random if None
+    :return: the path with every dated component rewritten
     """
     parts = pathlib.Path(full_dirname).parts
     clean_parts = []
@@ -54,8 +57,7 @@ def clean_dirname(full_dirname: str, date_offset: pd.Timedelta|None =None) -> st
             clean_parts.append(part.replace(date_str, new_date_str))
         else:
             clean_parts.append(part)
-    clean_dirname = os.path.join(*parts)
-    return clean_dirname
+    return os.path.join(*clean_parts)
 
 
 def clean_filename(full_filename: str, date_offset: pd.Timedelta|None =None) -> str:
@@ -93,11 +95,12 @@ def remove_audio_nsx(nsx_file: NsxFile, output_filename: str, audio_channel_keys
         else:
             non_audio_channels.append(i)
 
-    return nsx_file.savesubsetnsx(non_audio_channels, out_file=output_filename)
+    return write_one_nsx_file(nsx_file, output_filename, keep_indices=non_audio_channels)
 
 
 def remove_dates_nev(nev_file: NevFile, output_filename: str|None = None, date_offset: pd.Timedelta|None =None):
     """UTC dates in the NeV file are PHI"""
+    print('Removing dates from headers')
     date_offset = random_date_offset() if date_offset is None else date_offset
     nev_file.basic_header['TimeOrigin'] = scramble_date(nev_file.basic_header['TimeOrigin'], date_offset)
     if output_filename:
@@ -107,10 +110,9 @@ def remove_dates_nev(nev_file: NevFile, output_filename: str|None = None, date_o
 
 def remove_dates_nsx(nsx_file: NsxFile, output_filename: str|None = None, date_offset: pd.Timedelta|None =None):
     """UTC dates in the NsX files are PHI since they imply admission/clinical visit dates"""
-
+    print('Removing dates from headers')
     date_offset = random_date_offset() if date_offset is None else date_offset
     nsx_file.basic_header['TimeOrigin'] = scramble_date(nsx_file.basic_header['TimeOrigin'], date_offset)
-
     if output_filename:
         write_one_nsx_file(nsx_file, output_filename)
     return nsx_file

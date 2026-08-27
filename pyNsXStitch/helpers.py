@@ -14,10 +14,15 @@ from struct import pack, unpack
 import pandas as pd
 
 from pyNsXStitch.stitchers import StitchedNeVFile, StitchedNsXFile
-from pyNsXStitch.streamers import stream_nev_packets, iter_nsx_timestamps
+from pyNsXStitch.streamers import stream_nev_packets, iter_nsx_timestamps, stream_nsx_data
 
 nsx_copy_headers = []
 REC_EVENT_PACKET_ID = 65529
+
+# On-disk sizes (bytes) of the NsX 2.2+ / 3.x headers, matching brpylib's layout
+NSX_BASIC_HEADER_BYTES = 314
+NSX_EXT_HEADER_BYTES = 66
+_NSX_FILTER_CODES = {'none': 0, 'butterworth': 1, None: 0}
 
 
 def get_all_streamed_files(directory, full_paths=False):
@@ -287,12 +292,110 @@ def write_one_nev_file(nev_file: NevFile, output_path: str):
             out_file.write(pack('<Q', timestamp))
             out_file.write(pack('<H', packet_id))
             out_file.write(packet)
+    print(f'Saved anonymized file to {output_path}')
 
-def write_one_nsx_file(nsx_file: NsxFile, output_path: str, **kwargs):
+def _fixed_str(value: str, length: int) -> bytes:
+    """Encode a string to a fixed-width, null-padded byte field (inverse of brpylib.format_stripstring)."""
+    return (value or '').encode('latin-1')[:length].ljust(length, b'\x00')
+
+
+def _freq_to_uint(value) -> int:
+    """Inverse of brpylib.format_freq, which renders a milli-Hz uint as e.g. '300.0 Hz'."""
+    if value is None:
+        return 0
+    return int(round(float(str(value).split(' ')[0]) * 1000))
+
+
+def _timeorigin_bytes(dt) -> bytes:
     """
-    Minimal wrapper around NsX File's writesubsetnsx for sake of nicety
+    Inverse of brpylib.format_timeorigin: 8 x uint16 Windows SYSTEMTIME
+    (year, month, day-of-week, day, hour, minute, second, millisecond).
+    SYSTEMTIME's wDayOfWeek is 0=Sunday..6=Saturday.
     """
-    nsx_file.savesubsetnsx(out_file=output_path, **kwargs)
+    return pack('<8H', dt.year, dt.month, dt.isoweekday() % 7, dt.day,
+                dt.hour, dt.minute, dt.second, dt.microsecond // 1000)
+
+
+def _nsx_header_bytes(nsx_file: NsxFile, keep_indices: list) -> bytes:
+    """
+    Serialise the NsX header block (basic + extended headers) for the channels at
+    ``keep_indices``, entirely from the in-memory ``nsx_file.basic_header`` /
+    ``nsx_file.extended_headers``. The source file is never re-read, so edits already
+    applied to those dicts (e.g. a scrambled ``TimeOrigin``) are carried through. Only
+    ``BytesInHeader`` and ``ChannelCount`` are recomputed for the reduced channel set.
+    """
+    bh = nsx_file.basic_header
+    if bh['FileTypeID'] != 'BRSMPGRP':
+        raise TypeError(f'Only BRSMPGRP type NsX files are supported (found {bh["FileTypeID"]})')
+
+    kept_ext = [nsx_file.extended_headers[i] for i in keep_indices]
+    n_keep = len(kept_ext)
+    new_bytes_in_header = NSX_BASIC_HEADER_BYTES + NSX_EXT_HEADER_BYTES * n_keep
+
+    major, minor = (int(p) for p in str(bh['FileSpec']).split('.'))
+    header = bytearray(
+        _fixed_str(bh['FileTypeID'], 8)
+        + pack('<BB', major, minor)
+        + pack('<I', new_bytes_in_header)
+        + _fixed_str(bh['Label'], 16)
+        + _fixed_str(bh['Comment'], 256)
+        + pack('<I', bh['Period'])
+        + pack('<I', int(bh['TimeStampResolution']))
+        + _timeorigin_bytes(bh['TimeOrigin'])
+        + pack('<I', n_keep)
+    )
+    for ext in kept_ext:
+        header += (
+            _fixed_str(ext['Type'], 2)
+            + pack('<H', ext['ElectrodeID'])
+            + _fixed_str(ext['ElectrodeLabel'], 16)
+            + pack('<BB', ext['PhysicalConnector'], ext['ConnectorPin'])
+            + pack('<hhhh', ext['MinDigitalValue'], ext['MaxDigitalValue'],
+                   ext['MinAnalogValue'], ext['MaxAnalogValue'])
+            + _fixed_str(ext['Units'], 16)
+            + pack('<IIH', _freq_to_uint(ext['HighFreqCorner']), ext['HighFreqOrder'],
+                   _NSX_FILTER_CODES[ext['HighFreqType']])
+            + pack('<IIH', _freq_to_uint(ext['LowFreqCorner']), ext['LowFreqOrder'],
+                   _NSX_FILTER_CODES[ext['LowFreqType']])
+        )
+
+    if len(header) != new_bytes_in_header:
+        raise ValueError(f'Rebuilt NsX header is {len(header)} bytes, expected {new_bytes_in_header}')
+    return bytes(header)
+
+
+def write_one_nsx_file(nsx_file: NsxFile, output_path: str, keep_indices=None):
+    """
+    Write an in-memory NsxFile object (from brpylib.py) out to disk as a standalone NsX file.
+
+    The header is re-serialised from ``nsx_file.basic_header`` / ``nsx_file.extended_headers``
+    so any edits to those dicts are preserved. The data section is streamed packet-by-packet
+    via ``stream_nsx_data``, so files of arbitrary size are written with bounded memory.
+    ``stream_nsx_data`` parses the 64-bit packet timestamps of filespec >= 3.0 files, which
+    ``NsxFile.savesubsetnsx`` does not.
+
+    :param nsx_file: source NsxFile object (BRSMPGRP / filespec >= 2.2)
+    :param output_path: path of the NsX file to write
+    :param keep_indices: [optional] channel indices (positions in
+        ``nsx_file.extended_headers``) to retain; ``None`` keeps every channel
+    """
+    if keep_indices is None:
+        keep_indices = list(range(nsx_file.basic_header['ChannelCount']))
+
+    with open(output_path, 'wb') as out_file:
+        out_file.write(_nsx_header_bytes(nsx_file, keep_indices))
+
+        # Stream the (potentially tens of GB) data section, slicing out kept channel columns
+        for meta, data_block in stream_nsx_data(nsx_file):
+            if meta is not None:
+                start_ts, n_points = meta
+                out_file.write(b'\x01')
+                out_file.write(pack('<Q', start_ts))
+                out_file.write(pack('<I', n_points))
+            out_file.write(np.ascontiguousarray(data_block[:, keep_indices]).tobytes())
+
+    print(f'Saved anonymized file to {output_path}')
+
 
 def stitch_one_task(streamed_files, output_dir, task_name, start, end, aggressive=False):
 
