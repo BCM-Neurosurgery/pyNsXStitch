@@ -24,13 +24,22 @@ def make_outpath(full_path, base_dir=None, out_dir=None, clean=True, date_offset
     return out_file
 
 
-def anonymize_one_file(file_path, out_file, date_offset=None):
+def anonymize_one_file(file_path, out_file, date_offset=None, audio_channels=None):
     """Anonymize a single .nev or .nsX file, writing the result to out_file."""
     date_offset = epoch_start_offset(find_dates(file_path)) if date_offset is None else date_offset
     if re.search(r'\.ns[1-9]$', file_path):
-        return nsx_anonymize(NsxFile(file_path), output_filename=out_file, date_offset=date_offset)
+        return nsx_anonymize(
+            NsxFile(file_path),
+            output_filename=out_file,
+            date_offset=date_offset,
+            audio_channels=audio_channels
+        )
     elif re.search(r'\.nev$', file_path):
-        return nev_anonymize(NevFile(file_path), output_filename=out_file, date_offset=date_offset)
+        return nev_anonymize(
+            NevFile(file_path),
+            output_filename=out_file,
+            date_offset=date_offset
+        )
     raise ValueError(f'Unsupported file type (expected .nev or .ns1-9): {file_path}')
 
 
