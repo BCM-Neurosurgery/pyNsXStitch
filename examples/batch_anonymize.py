@@ -3,7 +3,8 @@ import re
 
 from brpylib import NsxFile, NevFile
 
-from pyNsXStitch.anonymizers import nsx_anonymize, nev_anonymize, clean_filename, clean_dirname, random_date_offset
+from pyNsXStitch.anonymizers import nsx_anonymize, nev_anonymize, clean_filename, clean_dirname
+from pyNsXStitch.utils import epoch_start_offset, BRK_DATE_RE
 
 BRK_FILE_RE = r'\.(nev|ns[1-9])$'
 
@@ -25,7 +26,7 @@ def make_outpath(full_path, base_dir=None, out_dir=None, clean=True, date_offset
 
 def anonymize_one_file(file_path, out_file, date_offset=None):
     """Anonymize a single .nev or .nsX file, writing the result to out_file."""
-    date_offset = random_date_offset() if date_offset is None else date_offset
+    date_offset = epoch_start_offset(find_dates(file_path)) if date_offset is None else date_offset
     if re.search(r'\.ns[1-9]$', file_path):
         return nsx_anonymize(NsxFile(file_path), output_filename=out_file, date_offset=date_offset)
     elif re.search(r'\.nev$', file_path):
@@ -33,13 +34,24 @@ def anonymize_one_file(file_path, out_file, date_offset=None):
     raise ValueError(f'Unsupported file type (expected .nev or .ns1-9): {file_path}')
 
 
+def find_dates(file_path):
+    """Recurse through a directory finding BRK-formatted dates in the filenames"""
+    dates_found = []
+    for thing_here in os.listdir(file_path):
+        full_path = os.path.join(file_path, thing_here)
+        if os.path.isdir(full_path):
+            dates_found.extend(find_dates(full_path))
+        elif re.search(BRK_DATE_RE, thing_here):
+            dates_found.append(thing_here)
+    return list(set(dates_found))
+
 def recurse_anonymize(file_path, base_dir=None, out_dir=None, clean_names=True, date_offset=None):
     """
     Recurse through a directory, anonymizing every .nev/.nsX file via anonymize_one_file
     and preserving the directory structure under out_dir.
     """
 
-    date_offset = random_date_offset() if date_offset is None else date_offset
+    date_offset = epoch_start_offset(find_dates(file_path)) if date_offset is None else date_offset
 
     results = {}
     for thing_here in os.listdir(file_path):

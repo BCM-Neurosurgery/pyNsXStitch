@@ -9,24 +9,18 @@ import warnings
 import os
 import re
 import pathlib
-import numpy as np
 import pandas as pd
 from brpylib import NsxFile, NevFile
 from pyNsXStitch.helpers import write_one_nev_file, write_one_nsx_file
-
+from pyNsXStitch.utils import random_date_offset, epoch_start_offset, BRK_DATE_RE, BRK_FILENAME_RE
 
 DEFAULT_AUDIO_CHAN_FRAG = [
     'mic',
     'audio',
     'room'
 ]
-BRK_DATE_RE = r'(\d{8}-\d{6})'
-BRK_FILENAME_RE = r'NSP(\d)-(\d{8}-\d{6})-(\d{3})\.(nev|ns\d)'
+OFFSET_DEFAULT = epoch_start_offset
 
-
-def random_date_offset():
-    """Create a random datetime offset +- 31 years"""
-    return pd.Timedelta(np.random.uniform(-10**9, 10**9), unit='s')
 
 def scramble_date(date, offset=None):
     """
@@ -35,9 +29,10 @@ def scramble_date(date, offset=None):
     Using a consistent random offset for a whole visit would preserver order of files, but scramble the PHI
     """
     if offset is None:
-        offset = random_date_offset()
+        offset = OFFSET_DEFAULT()
     new_date = pd.Timestamp(date) + offset
     return new_date.to_pydatetime()
+
 
 def clean_dirname(full_dirname: str, date_offset: pd.Timedelta|None =None) -> str:
     """
