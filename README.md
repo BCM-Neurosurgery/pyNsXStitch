@@ -20,6 +20,7 @@ To install this as a python project you can use to perform custom stitching:
   - Then install all the requirements with one of the following, depending on the environment manager you use
     - conda: `pip install .`
     - uv:    `uv pip install .`
+    - NOTE: if you are using GitHub Desktop to clone, you may need to set the credential manager to use permissions from GitHub Desktop
   - Check out the usage section below for usage instructions. If you plan to run the included jupyter notebooks, you 
 will need to make sure `jupyter` is installed.
 
@@ -49,6 +50,14 @@ additional details
 There are several ready to use scripts to accomplish various common tasks, more or less ready to use. However, these
 scripts are generally designed as simplified stubs and examples of usage. To customize behavior, please build out your
 own scripts using this package as a dependency.
+
+To run these scripts from terminal, make sure you are in the root directory of the source code, have your python
+environment activated, and then run them with:
+```bash
+python examples/script_name.py [options]
+```
+Some scripts may require or accept options. Please check each script for detailed usage instructions. 
+For scripts that include/define a CLI, use --help to get full usage instructions
 
 We list a few of the more useful scripts here.
 
