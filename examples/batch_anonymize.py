@@ -3,7 +3,8 @@ import re
 
 from brpylib import NsxFile, NevFile
 
-from pyNsXStitch.anonymizers import nsx_anonymize, nev_anonymize, clean_filename, clean_dirname, random_date_offset
+from pyNsXStitch.anonymizers import nsx_anonymize, nev_anonymize, clean_filename, clean_dirname
+from pyNsXStitch.utils import epoch_start_offset, BRK_DATE_RE
 
 BRK_FILE_RE = r'\.(nev|ns[1-9])$'
 
@@ -23,23 +24,45 @@ def make_outpath(full_path, base_dir=None, out_dir=None, clean=True, date_offset
     return out_file
 
 
-def anonymize_one_file(file_path, out_file, date_offset=None):
+def anonymize_one_file(file_path, out_file, date_offset=None, audio_channels=None):
     """Anonymize a single .nev or .nsX file, writing the result to out_file."""
-    date_offset = random_date_offset() if date_offset is None else date_offset
+    date_offset = epoch_start_offset(find_dates(file_path)) if date_offset is None else date_offset
     if re.search(r'\.ns[1-9]$', file_path):
-        return nsx_anonymize(NsxFile(file_path), output_filename=out_file, date_offset=date_offset)
+        return nsx_anonymize(
+            NsxFile(file_path),
+            output_filename=out_file,
+            date_offset=date_offset,
+            audio_channels=audio_channels
+        )
     elif re.search(r'\.nev$', file_path):
-        return nev_anonymize(NevFile(file_path), output_filename=out_file, date_offset=date_offset)
+        return nev_anonymize(
+            NevFile(file_path),
+            output_filename=out_file,
+            date_offset=date_offset
+        )
     raise ValueError(f'Unsupported file type (expected .nev or .ns1-9): {file_path}')
 
 
-def recurse_anonymize(file_path, base_dir=None, out_dir=None, clean_names=True, date_offset=None):
+def find_dates(file_path):
+    """Recurse through a directory finding BRK-formatted dates in the filenames"""
+    dates_found = []
+    for thing_here in os.listdir(file_path):
+        full_path = os.path.join(file_path, thing_here)
+        if os.path.isdir(full_path):
+            dates_found.extend(find_dates(full_path))
+        else:
+            date_match = re.search(BRK_DATE_RE, thing_here)
+            if date_match:
+                dates_found.append(date_match.group(1))
+    return list(set(dates_found))
+
+def recurse_anonymize(file_path, base_dir=None, out_dir=None, clean_names=True, date_offset=None, audio_channels=None):
     """
     Recurse through a directory, anonymizing every .nev/.nsX file via anonymize_one_file
     and preserving the directory structure under out_dir.
     """
 
-    date_offset = random_date_offset() if date_offset is None else date_offset
+    date_offset = epoch_start_offset(*find_dates(file_path)) if date_offset is None else date_offset
 
     results = {}
     for thing_here in os.listdir(file_path):
@@ -51,7 +74,8 @@ def recurse_anonymize(file_path, base_dir=None, out_dir=None, clean_names=True, 
                 base_dir=base_dir,
                 out_dir=out_dir,
                 clean_names=clean_names,
-                date_offset=date_offset
+                date_offset=date_offset,
+                audio_channels=audio_channels
             )
         elif re.search(BRK_FILE_RE, thing_here):
             out_file = make_outpath(
@@ -61,7 +85,11 @@ def recurse_anonymize(file_path, base_dir=None, out_dir=None, clean_names=True, 
                 clean=clean_names,
                 date_offset=date_offset
             )
-            one_result = anonymize_one_file(full_path, out_file, date_offset=date_offset)
+            one_result = anonymize_one_file(
+                full_path, out_file,
+                date_offset=date_offset,
+                audio_channels=audio_channels
+            )
             results[thing_here] = {'status': one_result}
     return results
 
@@ -78,14 +106,21 @@ if __name__ == '__main__':
                                  '(for a directory input, preserving structure)')
     arg_parser.add_argument('--keep-names', action='store_true',
                             help='Do not scramble dates in output file/directory names')
+    arg_parser.add_argument('--bcm-defaults', action='store_true',
+                            help='Use less aggressive audio channel removal based on BCM naming convention')
     args = arg_parser.parse_args()
+
+
+    if args.bcm_defaults:
+        from pyNsXStitch import anonymizers
+        anonymizers.DEFAULT_AUDIO_CHAN_FRAG = ["RoomMic"]
 
     if os.path.isdir(args.input_path):
         recurse_anonymize(
             args.input_path,
             base_dir=args.input_path,
             out_dir=args.out_path,
-            clean_names=not args.keep_names,
+            clean_names=not args.keep_names
         )
     else:
         anonymize_one_file(args.input_path, args.out_path)
