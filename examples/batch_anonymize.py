@@ -104,8 +104,8 @@ if __name__ == '__main__':
     arg_parser.add_argument('out_path', type=str,
                             help='Output file (for a single input file) or output directory '
                                  '(for a directory input, preserving structure)')
-    arg_parser.add_argument('--keep-names', action='store_true',
-                            help='Do not scramble dates in output file/directory names')
+    arg_parser.add_argument('--keep-paths', action='store_true',
+                            help='Do not obfuscate dates in output file/directory names')
     arg_parser.add_argument('--bcm-defaults', action='store_true',
                             help='Use less aggressive audio channel removal based on BCM naming convention')
     args = arg_parser.parse_args()
