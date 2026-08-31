@@ -3,11 +3,14 @@ import pandas as pd
 
 from pyNsXStitch.helpers import load_comments_in_folder, stitch_one_task
 
-BASE_SOURCE_DIR = r"Z:\trd\DBSTRD011\NEURAL"
-BASE_OUTPUT_DIR = r"D:\Work\DataNet\TestData\temp\for Kat"
+# Directory which contains one or more TOC-mode recordings to stitch data from
+BASE_SOURCE_DIR = r"/path/to/source/data"
 
-# Task list csv must have 3 columns: Date folder, EMU ID,  Task Name
-TASK_LIST_CSV = r'D:\Work\BCM\pyNsXStitch\examples\TRD011_log_file_Doors.csv'
+# Directory into which to output the stitched files
+BASE_OUTPUT_DIR = r"/output/destination"
+
+# Path to a csv with a list of tasks to stitch. The csv must have 3 columns: Date folder, EMU ID,  Task Name
+TASK_LIST_CSV = r'/path/to/csv/with/task/list'
 
 AGGRESIVE_STITCH = True
 

@@ -20,19 +20,20 @@ os.makedirs(OUT_PATH, exist_ok=True)
 copied_files = []
 
 # For each type of streamed file (NeV and NsX) create the appropriate stitcher and write the stitched file
-streamed_files = get_all_streamed_files(FILE_SOURCE, full_paths=True)
-for filetype, files in streamed_files.items():
-    if filetype == 'NeV':
-        combo = StitchedNeVFile(files)
-    else:
-        combo = StitchedNsXFile(files)
+all_streamed_files = get_all_streamed_files(FILE_SOURCE, full_paths=True)
+for nsp_id, streamed_files in all_streamed_files.items():
+    for filetype, files in streamed_files.items():
+        if filetype == 'NeV':
+            combo = StitchedNeVFile(files)
+        else:
+            combo = StitchedNsXFile(files)
 
-    full_out_path = os.path.join(OUT_PATH, f'{FILE_NAME}.{filetype.lower()}')
-    with open(full_out_path, 'wb') as f:
-        combo.write(f)
+        full_out_path = os.path.join(OUT_PATH, f'{FILE_NAME}.{filetype.lower()}')
+        with open(full_out_path, 'wb') as f:
+            combo.write(f)
 
-    filenames = [os.path.basename(f) for f in files]
-    copied_files.extend(filenames)
+        filenames = [os.path.basename(f) for f in files]
+        copied_files.extend(filenames)
 
 # Copy any other files that have not been copied yet. This will include all metadata, configuration, and helper files
 all_files = os.listdir(FILE_SOURCE)
