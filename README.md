@@ -3,8 +3,6 @@
 Small helper library to stitch together Blackrock NeV and NsX files from a chunked recording into task specific files 
 based on comments
 
-**** WARNING: THIS CODE IS STILL IN THE TEST/VERIFICATION STAGE. ***
-
 Please report any bugs and issues you find as issues on the github repo:
 https://github.com/BCM-Neurosurgery/pyNsXStitch/issues
 
@@ -12,34 +10,55 @@ https://github.com/BCM-Neurosurgery/pyNsXStitch/issues
 
 ### Stand-alone
 To install this as a python project you can use to perform custom stitching:
-  - Make sure you have a python environment (conda recommended) install with python 3.10 or greater
-  - Clone the repository
+  - Make sure you have python 3.10 or newer installed (3.12 or newer recommended)
+  - Make sure you have a python virtual environment set up and activated (uv  or conda recommended).
+  - Clone the repository. You can use GitHub Desktop, or if you're working in terminal:
     ```bash
     git clone git@github.com:BCM-Neurosurgery/pyNsXStitch.git
     ```
-  - Then install all the requirements with
-    ```bash
-    pip install -r requirements.txt
-    ```
+  - Make sure to `cd` to the cloned directory containing the source code
+  - Then install all the requirements with one of the following, depending on the environment manager you use
+    - conda: `pip install .`
+    - uv:    `uv pip install .`
   - Check out the usage section below for usage instructions. If you plan to run the included jupyter notebooks, you 
-will need to make sure `jupyter` is installed. You can either do this yourself, or uncomment the jupyter line in the 
-requirements file before running the pip command above.
+will need to make sure `jupyter` is installed.
 
 
 ### Dependency
-To install this code as a dependency to your own project, add the following line to your requirements.txt:
+To install this code as a dependency to your own project, add the following line to your dependencies in your `pyproject.toml`:
 ```requirements
 pyNsXStitch @ git+ssh://git@github.com/BCM-Neurosurgery/pyNsXStitch.git@main
 ```
-This will automatically solve the dependencies of this project and install it as a python package when you run
-```bash
-pip install -r requirements.txt
-```
+This will automatically solve the dependencies of this project and install it as a python package when you install all 
+the dependencies for your project
 
 ## Usage
 See GUI_Instructions.md for extensive instructions on how to use the GUI. This section is primarily concerned with
 using the code directly as a part of your python code. See the scripts and notebooks in the `examples` folder for
 additional details
+
+
+### Usage ready scripts
+There are several ready to use scripts to accomplish various common tasks, more or less ready to use. However, these
+scripts are generally designed as simplified stubs and examples of usage. To customize behavior, please build out your
+own scripts using this package as a dependency.
+
+We list a few of the more useful scripts here.
+
+#### batch_anonymize.py
+Recurse through the contents of a directory, applying basic anonymization functions to all BRK files discovered in that 
+directory and outputting them to a new location. 
+
+**THIS PROCESS DOES NOT GUARANTEE COMPLETE ANONYMIZATION AND YOU MUST ALWAYS CHECK THAT THE OUTPUT FILES ARE CORRECTLY 
+ANONYMIZED AND STRIPPED OF POTENTIAL PHI!**
+
+#### stitch_all.py
+Stitch together all the individual TOC-mode BRK files in a directory into a single output file.
+
+#### stitch_listed.py
+Stitch together data from a collection of TOC mode recordings based on tasks listed in a csv file
+
+### Python functionality
 
 This package is broken up into several modules:
 #### Stitchers
@@ -66,6 +85,16 @@ value will be `None`. In all cases, the packet data is a numpy memory_map of the
 end of the packet then it will be truncated.
   - `iter_nsx_timestamps`: Quickly iterate through all the packets in an NsX file, returning only the headers. Useful 
 primarily for checking the size and duration of the NsX file, as well as assessing data drop rates
+
+
+#### Anonymizers
+Collection of functions and tools useful for anonymizing BRK data files and stripping out PHI.
+  - `remove_audio_nsx`:
+  - `remove_dates_nev`:
+  - `remove_dates_nsx`:
+  - `nev_anoonymize`: Helper function to anonymize a single nev file. Currently only obfuscates dates
+  - `nsx_anonymize`: Helper function to anonymize a single NSX file. Currently removes audio channels and obfuscates dates
+
 
 #### Helpers
 These are small atomic functions that provide helpful utilities when performing stitching. Some of the most useful ones
