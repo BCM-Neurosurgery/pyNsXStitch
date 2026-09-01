@@ -1,10 +1,10 @@
-from struct import unpack, pack
+from struct import unpack, pack, calcsize
 
 import numpy as np
 from datetime import datetime
 from brpylib import NsxFile, NevFile
 from brpylib.brpylib import ELEC_ID_DEF, check_elecid, check_dataelecid, NSX_BASIC_HEADER_BYTES_22, \
-    NSX_EXT_HEADER_BYTES_22
+    NSX_EXT_HEADER_BYTES_22, nev_header_dict
 
 from pyNsXStitch.streamers import stream_nev_packets, stream_nsx_data
 
@@ -12,8 +12,8 @@ from pyNsXStitch.streamers import stream_nev_packets, stream_nsx_data
 class StitchedNeVFile(object):
 
     meta_size = 8 + 2
-    create_file_loc = 8 + 2*2 + 4*4 + 16
-    basic_header_size = create_file_loc + 32 + 256 + 4
+    # On-disk size (bytes) of the NEV basic header, derived from brpylib's own field layout
+    basic_header_size = calcsize('<' + ''.join(fmt for _, fmt, _ in nev_header_dict['basic']))
 
     def __init__(self, files_to_stitch, start=None, end=None):
         self.files = files_to_stitch

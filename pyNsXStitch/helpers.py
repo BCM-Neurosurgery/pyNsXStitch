@@ -8,8 +8,10 @@ import warnings
 
 import numpy as np
 from brpylib import NevFile, NsxFile
+from brpylib.brpylib import NSX_BASIC_HEADER_BYTES_22, NSX_EXT_HEADER_BYTES_22, nsx_header_dict, \
+    format_none, format_stripstring, format_freq, format_filter, format_timeorigin, format_filespec
 
-from struct import pack, unpack
+from struct import pack, unpack, calcsize
 
 import pandas as pd
 
@@ -19,9 +21,6 @@ from pyNsXStitch.streamers import stream_nev_packets, iter_nsx_timestamps, strea
 nsx_copy_headers = []
 REC_EVENT_PACKET_ID = 65529
 
-# On-disk sizes (bytes) of the NsX 2.2+ / 3.x headers, matching brpylib's layout
-NSX_BASIC_HEADER_BYTES = 314
-NSX_EXT_HEADER_BYTES = 66
 _NSX_FILTER_CODES = {'none': 0, 'butterworth': 1, None: 0}
 
 
@@ -316,6 +315,33 @@ def _timeorigin_bytes(dt) -> bytes:
                 dt.hour, dt.minute, dt.second, dt.microsecond // 1000)
 
 
+def _pack_filespec(value, fmt: str) -> bytes:
+    """Inverse of brpylib.format_filespec, which renders 2 raw uint8 as e.g. '2.3'."""
+    major, minor = (int(p) for p in str(value).split('.'))
+    return pack('<' + fmt, major, minor)
+
+
+# Maps each brpylib format_* function (as used in nsx_header_dict field defs) to its inverse,
+# so header field layout/order/widths stay driven by brpylib's own field lists rather than
+# being re-typed here. Each inverse takes (value, struct_fmt_for_this_field) -> bytes.
+_INVERSE_FORMATTERS = {
+    format_none: lambda value, fmt: pack('<' + fmt, value),
+    format_stripstring: lambda value, fmt: _fixed_str(value, calcsize(fmt)),
+    format_freq: lambda value, fmt: pack('<' + fmt, _freq_to_uint(value)),
+    format_filter: lambda value, fmt: pack('<' + fmt, _NSX_FILTER_CODES[value]),
+    format_timeorigin: lambda value, fmt: _timeorigin_bytes(value),
+    format_filespec: _pack_filespec,
+}
+
+
+def pack_header(fields, values: dict) -> bytes:
+    """
+    Inverse of brpylib.processheaders: pack a header dict back into its on-disk binary form,
+    using the same field-def list (e.g. ``nsx_header_dict['basic']``) that was used to read it.
+    """
+    return b''.join(_INVERSE_FORMATTERS[fun](values[name], fmt) for name, fmt, fun in fields)
+
+
 def _nsx_header_bytes(nsx_file: NsxFile, keep_indices: list) -> bytes:
     """
     Serialise the NsX header block (basic + extended headers) for the channels at
@@ -330,34 +356,13 @@ def _nsx_header_bytes(nsx_file: NsxFile, keep_indices: list) -> bytes:
 
     kept_ext = [nsx_file.extended_headers[i] for i in keep_indices]
     n_keep = len(kept_ext)
-    new_bytes_in_header = NSX_BASIC_HEADER_BYTES + NSX_EXT_HEADER_BYTES * n_keep
+    new_bytes_in_header = NSX_BASIC_HEADER_BYTES_22 + NSX_EXT_HEADER_BYTES_22 * n_keep
 
-    major, minor = (int(p) for p in str(bh['FileSpec']).split('.'))
-    header = bytearray(
-        _fixed_str(bh['FileTypeID'], 8)
-        + pack('<BB', major, minor)
-        + pack('<I', new_bytes_in_header)
-        + _fixed_str(bh['Label'], 16)
-        + _fixed_str(bh['Comment'], 256)
-        + pack('<I', bh['Period'])
-        + pack('<I', int(bh['TimeStampResolution']))
-        + _timeorigin_bytes(bh['TimeOrigin'])
-        + pack('<I', n_keep)
-    )
+    basic_values = dict(bh, BytesInHeader=new_bytes_in_header, ChannelCount=n_keep)
+    header = bytearray(_fixed_str(bh['FileTypeID'], 8))
+    header += pack_header(nsx_header_dict['basic'], basic_values)
     for ext in kept_ext:
-        header += (
-            _fixed_str(ext['Type'], 2)
-            + pack('<H', ext['ElectrodeID'])
-            + _fixed_str(ext['ElectrodeLabel'], 16)
-            + pack('<BB', ext['PhysicalConnector'], ext['ConnectorPin'])
-            + pack('<hhhh', ext['MinDigitalValue'], ext['MaxDigitalValue'],
-                   ext['MinAnalogValue'], ext['MaxAnalogValue'])
-            + _fixed_str(ext['Units'], 16)
-            + pack('<IIH', _freq_to_uint(ext['HighFreqCorner']), ext['HighFreqOrder'],
-                   _NSX_FILTER_CODES[ext['HighFreqType']])
-            + pack('<IIH', _freq_to_uint(ext['LowFreqCorner']), ext['LowFreqOrder'],
-                   _NSX_FILTER_CODES[ext['LowFreqType']])
-        )
+        header += pack_header(nsx_header_dict['extended'], ext)
 
     if len(header) != new_bytes_in_header:
         raise ValueError(f'Rebuilt NsX header is {len(header)} bytes, expected {new_bytes_in_header}')
