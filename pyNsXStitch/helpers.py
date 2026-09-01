@@ -16,7 +16,7 @@ from struct import pack, unpack, calcsize
 import pandas as pd
 
 from pyNsXStitch.stitchers import StitchedNeVFile, StitchedNsXFile
-from pyNsXStitch.streamers import stream_nev_packets, iter_nsx_timestamps, stream_nsx_data
+from pyNsXStitch.streamers import stream_nev_packets, iter_nsx_timestamps, stream_nsx_data, nsx_timestamp_fmt
 
 nsx_copy_headers = []
 REC_EVENT_PACKET_ID = 65529
@@ -108,7 +108,8 @@ def get_nsx_start_timestamp(nsx_filepath):
         nsx = NsxFile(nsx_filepath)
         end_of_header = nsx.basic_header["BytesInHeader"]
         nsx.datafile.seek(end_of_header + 1, 0)  # Move to the start of data, also skipping the null byte
-        timestamp = unpack("<Q", nsx.datafile.read(8))[0]
+        ts_fmt = nsx_timestamp_fmt(nsx)
+        timestamp = unpack(ts_fmt, nsx.datafile.read(calcsize(ts_fmt)))[0]
         return timestamp
     except Exception as e:
         raise e
@@ -351,8 +352,8 @@ def _nsx_header_bytes(nsx_file: NsxFile, keep_indices: list) -> bytes:
     ``BytesInHeader`` and ``ChannelCount`` are recomputed for the reduced channel set.
     """
     bh = nsx_file.basic_header
-    if bh['FileTypeID'] != 'BRSMPGRP':
-        raise TypeError(f'Only BRSMPGRP type NsX files are supported (found {bh["FileTypeID"]})')
+    if bh['FileTypeID'] not in ('BRSMPGRP', 'NEURALCD'):
+        raise TypeError(f'Only BRSMPGRP/NEURALCD type NsX files are supported (found {bh["FileTypeID"]})')
 
     kept_ext = [nsx_file.extended_headers[i] for i in keep_indices]
     n_keep = len(kept_ext)
@@ -379,13 +380,15 @@ def write_one_nsx_file(nsx_file: NsxFile, output_path: str, keep_indices=None):
     ``stream_nsx_data`` parses the 64-bit packet timestamps of filespec >= 3.0 files, which
     ``NsxFile.savesubsetnsx`` does not.
 
-    :param nsx_file: source NsxFile object (BRSMPGRP / filespec >= 2.2)
+    :param nsx_file: source NsxFile object (BRSMPGRP or NEURALCD, filespec >= 2.2)
     :param output_path: path of the NsX file to write
     :param keep_indices: [optional] channel indices (positions in
         ``nsx_file.extended_headers``) to retain; ``None`` keeps every channel
     """
     if keep_indices is None:
         keep_indices = list(range(nsx_file.basic_header['ChannelCount']))
+
+    ts_fmt = nsx_timestamp_fmt(nsx_file)
 
     with open(output_path, 'wb') as out_file:
         out_file.write(_nsx_header_bytes(nsx_file, keep_indices))
@@ -395,7 +398,7 @@ def write_one_nsx_file(nsx_file: NsxFile, output_path: str, keep_indices=None):
             if meta is not None:
                 start_ts, n_points = meta
                 out_file.write(b'\x01')
-                out_file.write(pack('<Q', start_ts))
+                out_file.write(pack(ts_fmt, start_ts))
                 out_file.write(pack('<I', n_points))
             out_file.write(np.ascontiguousarray(data_block[:, keep_indices]).tobytes())
 

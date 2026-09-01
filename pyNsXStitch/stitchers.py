@@ -6,7 +6,7 @@ from brpylib import NsxFile, NevFile
 from brpylib.brpylib import ELEC_ID_DEF, check_elecid, check_dataelecid, NSX_BASIC_HEADER_BYTES_22, \
     NSX_EXT_HEADER_BYTES_22, nev_header_dict
 
-from pyNsXStitch.streamers import stream_nev_packets, stream_nsx_data
+from pyNsXStitch.streamers import stream_nev_packets, stream_nsx_data, nsx_timestamp_fmt
 
 
 class StitchedNeVFile(object):
@@ -122,10 +122,10 @@ class StitchedNsXFile(object):
         origin = NsxFile(self.files[0])
         origin.datafile.seek(0, 0)
 
-        # Verify that the NsX file is written in the supported format
-        if origin.basic_header['FileTypeID'] != 'BRSMPGRP':
+        # Verify that the NsX file is written in a supported format
+        if origin.basic_header['FileTypeID'] not in ('BRSMPGRP', 'NEURALCD'):
             type_here = origin.basic_header['FileTypeID']
-            raise TypeError(f'Only BRSMPGRP type NsX files are currently supported! (found {type_here})')
+            raise TypeError(f'Only BRSMPGRP/NEURALCD type NsX files are currently supported! (found {type_here})')
 
         # Make sure we're writing to hte very start of the new file
         out_file.seek(0, 0)
@@ -133,6 +133,9 @@ class StitchedNsXFile(object):
         # Copy over the headers
         bytes_in_headers = origin.basic_header['BytesInHeader']
         out_file.write(origin.datafile.read(bytes_in_headers))
+
+        # New packets we write out use the same per-packet timestamp width as the source file
+        self.ts_fmt = nsx_timestamp_fmt(origin)
 
         sample_rate = (origin.basic_header['SampleResolution'] / origin.basic_header['Period'])
         ts_freq = origin.basic_header['TimeStampResolution']
@@ -182,7 +185,7 @@ class StitchedNsXFile(object):
                 else:
                     # Write this packet as a new packets
                     out_file.write(b'\x01')
-                    out_file.write(pack('<Q', start_ts))
+                    out_file.write(pack(self.ts_fmt, start_ts))
                     prev_n_points_loc = out_file.tell()  # Save this data location for future reference
                     out_file.write(pack('<I', n_points))
                     last_ts = start_ts  # Reset the ts counter to the start of this packet
