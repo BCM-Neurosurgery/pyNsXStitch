@@ -120,7 +120,7 @@ if __name__ == '__main__':
             args.input_path,
             base_dir=args.input_path,
             out_dir=args.out_path,
-            clean_names=not args.keep_names
+            clean_names=not args.keep_paths
         )
     else:
         anonymize_one_file(args.input_path, args.out_path)
