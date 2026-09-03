@@ -4,7 +4,7 @@ import re
 from brpylib import NsxFile, NevFile
 
 from pyNsXStitch.anonymizers import nsx_anonymize, nev_anonymize, clean_filename, clean_dirname
-from pyNsXStitch.utils import epoch_start_offset, BRK_DATE_RE
+from pyNsXStitch.utils import epoch_start_offset, BRK_DATE_RE, read_time_origin
 
 BRK_FILE_RE = r'\.(nev|ns[1-9])$'
 
@@ -43,7 +43,7 @@ def anonymize_one_file(file_path, out_file, date_offset=None, audio_channels=Non
     raise ValueError(f'Unsupported file type (expected .nev or .ns1-9): {file_path}')
 
 
-def find_dates(file_path):
+def find_dates(file_path, fallback_nsx_start=True):
     """Recurse through a directory finding BRK-formatted dates in the filenames"""
     dates_found = []
     for thing_here in os.listdir(file_path):
@@ -54,15 +54,25 @@ def find_dates(file_path):
             date_match = re.search(BRK_DATE_RE, thing_here)
             if date_match:
                 dates_found.append(date_match.group(1))
-    return list(set(dates_found))
+            elif fallback_nsx_start:
+                if re.search(BRK_FILE_RE, thing_here):
+                    file_time_origin = read_time_origin(full_path)
+                    dates_found.append(file_time_origin.strftime("%Y%m%d-%H%M%S"))
 
-def recurse_anonymize(file_path, base_dir=None, out_dir=None, clean_names=True, date_offset=None, audio_channels=None):
+    unique_dates = list(set(dates_found))
+    return unique_dates
+
+def recurse_anonymize(file_path, base_dir=None, out_dir=None, clean_names=True, date_offset=None, audio_channels=None, relative_time=True):
     """
     Recurse through a directory, anonymizing every .nev/.nsX file via anonymize_one_file
     and preserving the directory structure under out_dir.
     """
 
-    date_offset = epoch_start_offset(*find_dates(file_path)) if date_offset is None else date_offset
+    if relative_time:
+        date_offset = epoch_start_offset(*find_dates(file_path)) if date_offset is None else date_offset
+    else:
+        print('Ignoring relative file times. All files times will be obfuscated individually')
+        date_offset = None
 
     results = {}
     for thing_here in os.listdir(file_path):
@@ -75,7 +85,8 @@ def recurse_anonymize(file_path, base_dir=None, out_dir=None, clean_names=True, 
                 out_dir=out_dir,
                 clean_names=clean_names,
                 date_offset=date_offset,
-                audio_channels=audio_channels
+                audio_channels=audio_channels,
+                relative_time=relative_time
             )
         elif re.search(BRK_FILE_RE, thing_here):
             out_file = make_outpath(
@@ -106,6 +117,8 @@ if __name__ == '__main__':
                                  '(for a directory input, preserving structure)')
     arg_parser.add_argument('--keep-paths', action='store_true',
                             help='Do not obfuscate dates in output file/directory names')
+    arg_parser.add_argument('--no-relative-time', action='store_true',
+                            help='Reset all files to start at 1970-01-01. Destroys time relationship between files but no dependency on file structure.')
     arg_parser.add_argument('--bcm-defaults', action='store_true',
                             help='Use less aggressive audio channel removal based on BCM naming convention')
     args = arg_parser.parse_args()
@@ -120,7 +133,8 @@ if __name__ == '__main__':
             args.input_path,
             base_dir=args.input_path,
             out_dir=args.out_path,
-            clean_names=not args.keep_paths
+            clean_names=not args.keep_paths,
+            reset_all_times=not args.no_relative_time
         )
     else:
         anonymize_one_file(args.input_path, args.out_path)

@@ -249,9 +249,8 @@ def load_comments_in_folder(source_dir):
     print(f'Found {len(streamed_files["NeV"])} NeV files')
 
     # Iter through all the comment packets in all files
-    print(f'Loading comments from NeV...')
-    timestamps, comments, file_names = [], [], []
-    n_files = len(streamed_files["NeV"])
+    print('Loading comments from NeV...')
+    timestamps, comments = [], []
     for i, file in enumerate(streamed_files["NeV"]):
         nev = NevFile(file)
         for (ts, packet_id), raw_data in stream_nev_packets(nev, packet_type=65535):
@@ -280,6 +279,7 @@ def write_one_nev_file(nev_file: NevFile, output_path: str):
     :param nev_file: NevFile object (defined in brpylib.py) to write out
     :param output_path: Path of the .nev file to write
     """
+    print('Saving...')
     with open(output_path, 'wb') as out_file:
         # Copy the header from the origin file
         nev_file.datafile.seek(0, 0)
@@ -385,6 +385,8 @@ def write_one_nsx_file(nsx_file: NsxFile, output_path: str, keep_indices=None):
     :param keep_indices: [optional] channel indices (positions in
         ``nsx_file.extended_headers``) to retain; ``None`` keeps every channel
     """
+
+    print('Saving...')
     if keep_indices is None:
         keep_indices = list(range(nsx_file.basic_header['ChannelCount']))
 
