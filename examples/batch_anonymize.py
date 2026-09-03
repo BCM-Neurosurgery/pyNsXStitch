@@ -26,7 +26,7 @@ def make_outpath(full_path, base_dir=None, out_dir=None, clean=True, date_offset
 
 def anonymize_one_file(file_path, out_file, date_offset=None, audio_channels=None):
     """Anonymize a single .nev or .nsX file, writing the result to out_file."""
-    date_offset = epoch_start_offset(find_dates(file_path)) if date_offset is None else date_offset
+    date_offset = epoch_start_offset(*find_dates(file_path)) if date_offset is None else date_offset
     if re.search(r'\.ns[1-9]$', file_path):
         return nsx_anonymize(
             NsxFile(file_path),
@@ -134,7 +134,7 @@ if __name__ == '__main__':
             base_dir=args.input_path,
             out_dir=args.out_path,
             clean_names=not args.keep_paths,
-            reset_all_times=not args.no_relative_time
+            relative_time=not args.no_relative_time
         )
     else:
         anonymize_one_file(args.input_path, args.out_path)
