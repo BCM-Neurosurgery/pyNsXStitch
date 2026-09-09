@@ -29,7 +29,7 @@ def scramble_date(date, offset=None):
     Using a consistent random offset for a whole visit would preserver order of files, but scramble the PHI
     """
     if offset is None:
-        offset = DEFAULT_OFFSET_FUNC()
+        offset = DEFAULT_OFFSET_FUNC(date)
     new_date = pd.Timestamp(date) + offset
     return new_date.to_pydatetime()
 
@@ -75,7 +75,7 @@ def channel_name(nsx_file, index):
     return nsx_file.extended_headers[index]['ElectrodeLabel']
 
 def channel_id(nsx_file, index):
-    return nsx_file.extended_headers[index]['ElectrodeLabel']
+    return nsx_file.extended_headers[index]['ElectrodeID']
 
 def find_audio_channels(nsx_file):
     """
