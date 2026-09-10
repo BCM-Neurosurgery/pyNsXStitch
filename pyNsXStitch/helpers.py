@@ -88,7 +88,7 @@ def get_nsx_duration(nsx_filepath):
 
 def get_nsx_end_timestamp(nsx_filepath):
     """Return the end of the NsX file in time elapsed (seconds) since the recording start"""
-    nsx_file = NsxFile(nsx_filepath)
+    nsx_file = NsxFile(nsx_filepath, verbose=False, interactive=False)
     last_ts, packet_size = None, None
     for timestamp, packet_points in iter_nsx_timestamps(nsx_file):
         last_ts = timestamp
@@ -105,7 +105,7 @@ def get_nsx_end_timestamp(nsx_filepath):
 def get_nsx_start_timestamp(nsx_filepath):
     """Get the start time (in seconds) of this data file from the header of the first data packet"""
     try:
-        nsx = NsxFile(nsx_filepath)
+        nsx = NsxFile(nsx_filepath, verbose=False, interactive=False)
         end_of_header = nsx.basic_header["BytesInHeader"]
         nsx.datafile.seek(end_of_header + 1, 0)  # Move to the start of data, also skipping the null byte
         ts_fmt = nsx_timestamp_fmt(nsx)
@@ -164,7 +164,7 @@ def get_time_in_file(nsx_file, timestamp):
 
 def get_all_nev_comments(nev_filenames, gui_updater=None):
     """Get a data frame of all the comments in the listed NeV files"""
-    nev_files = [NevFile(fp) for fp in nev_filenames]
+    nev_files = [NevFile(fp, verbose=False, interactive=False) for fp in nev_filenames]
 
     # Read in all the comments from all the files
     all_easy_read = []
@@ -182,7 +182,10 @@ def get_all_nev_comments(nev_filenames, gui_updater=None):
             warnings.warn(f'Found no comments in NeV file! \n  {nev_filenames[i]}')
             continue
         all_easy_read.append(easy_read)
-    easy_read = pd.concat(all_easy_read)
+    if all_easy_read:
+        easy_read = pd.concat(all_easy_read)
+    else:
+        easy_read = pd.DataFrame.from_dict({'CharSet': [], 'Flag': [], 'Data': [], 'Comment': []})
     return easy_read
 
 
