@@ -56,10 +56,9 @@ environment activated, and then run them with:
 ```bash
 python examples/script_name.py [options]
 ```
-Some scripts may require or accept options. Please check each script for detailed usage instructions. 
-For scripts that include/define a CLI, use --help to get full usage instructions
 
-We list a few of the more useful scripts here.
+We list a few of the more useful scripts here. All of these include a CLI, and you can use --help to get full usage 
+instructions.
 
 ### batch_anonymize.py
 Recurse through the contents of a directory, applying basic anonymization functions to all BRK files discovered in that 
@@ -72,11 +71,13 @@ OUTPUT FILES ARE CORRECTLY ANONYMIZED AND STRIPPED OF POTENTIAL PHI!**
 Compare two versions of an NeV/NsX file, and list differences that are expected to have affected anonymization. Intended
 as a helper, not a complete check that all PHI has been removed.
 
-### stitch_all.py
+### stitch_whole_folder.py
 Stitch together all the individual TOC-mode BRK files in a directory into a single output file.
+This combines the entire folder as one unit; it does not detect or separate tasks.
 
-### stitch_listed.py
-Stitch together data from a collection of TOC mode recordings based on tasks listed in a csv file
+### stitch_listed_tasks.py
+Stitch out individual task windows from a collection of TOC-mode recordings, based on tasks
+listed in a csv file. Each task is bounded by matching NeV comments and written to its own output folder.
 
 ## Python functionality
 
