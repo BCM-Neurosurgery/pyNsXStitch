@@ -65,8 +65,12 @@ We list a few of the more useful scripts here.
 Recurse through the contents of a directory, applying basic anonymization functions to all BRK files discovered in that 
 directory and outputting them to a new location. 
 
-**THIS PROCESS DOES NOT GUARANTEE COMPLETE ANONYMIZATION AND YOU MUST ALWAYS CHECK THAT THE OUTPUT FILES ARE CORRECTLY 
-ANONYMIZED AND STRIPPED OF POTENTIAL PHI!**
+**THIS PROCESS ON ITS OWN DOES NOT GUARANTEE COMPLETE ANONYMIZATION AND YOU RETAIN RESPONSIBILITY FOR ENSURING THAT
+OUTPUT FILES ARE CORRECTLY ANONYMIZED AND STRIPPED OF POTENTIAL PHI!**
+
+### check_anonymized.py
+Compare two versions of an NeV/NsX file, and list differences that are expected to have affected anonymization. Intended
+as a helper, not a complete check that all PHI has been removed.
 
 ### stitch_all.py
 Stitch together all the individual TOC-mode BRK files in a directory into a single output file.
