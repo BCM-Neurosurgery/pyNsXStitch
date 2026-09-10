@@ -1,11 +1,24 @@
 import os
 from math import ceil
-from struct import unpack
+from struct import unpack, calcsize
 import numpy as np
 from brpylib.brpylib import DATA_BYTE_SIZE
 
 TIMESTAMP_BYTE_SIZE = 8
 DATA_PAGING_SIZE = 1024**2
+
+# Per-packet timestamp width in the NsX data section. FileSpec >= 3.0 (BRSMPGRP) packets carry
+# a 64-bit PTP timestamp; FileSpec 2.2/2.3 (NEURALCD) packets carry a 32-bit timestamp (see
+# brpylib.nsx_header_dict['data']). FileSpec 2.1 (NEURALSG) has no per-packet framing at all
+# and is not covered here.
+NSX_PTP_TS_FMT = '<Q'
+NSX_LEGACY_TS_FMT = '<I'
+
+
+def nsx_timestamp_fmt(nsx_file) -> str:
+    """Struct format for this NsX file's per-packet timestamp field, based on its FileSpec major version."""
+    major = int(str(nsx_file.basic_header['FileSpec']).split('.')[0])
+    return NSX_PTP_TS_FMT if major >= 3 else NSX_LEGACY_TS_FMT
 
 def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
     """
@@ -96,6 +109,8 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
     ts_ratio = ts_freq / sample_freq
     n_channels = nsx_file.basic_header["ChannelCount"]
     data_point_size = n_channels * DATA_BYTE_SIZE
+    ts_fmt = nsx_timestamp_fmt(nsx_file)
+    ts_size = calcsize(ts_fmt)
     nsx_file.datafile.seek(0, 0)
     section_size = (DATA_PAGING_SIZE // data_point_size) * data_point_size
 
@@ -109,7 +124,7 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
 
         # Get the time and length of this data packet
         nsx_file.datafile.seek(1, 1)
-        timestamp = unpack("<Q", nsx_file.datafile.read(8))[0]
+        timestamp = unpack(ts_fmt, nsx_file.datafile.read(ts_size))[0]
         packet_pts = unpack("<I", nsx_file.datafile.read(4))[0]
         packet_start = nsx_file.datafile.tell()
         if packet_pts == 0:
@@ -184,12 +199,14 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
 def iter_nsx_timestamps(nsx_file):
     """Loop through and quickly read off all the packet headers in an NsX file"""
     data_point_size = nsx_file.basic_header['ChannelCount'] * DATA_BYTE_SIZE
+    ts_fmt = nsx_timestamp_fmt(nsx_file)
+    ts_size = calcsize(ts_fmt)
 
     file_size = os.path.getsize(nsx_file.datafile.name)
     ts_pointer = nsx_file.basic_header['BytesInHeader'] + 1
     while ts_pointer < file_size:
         nsx_file.datafile.seek(ts_pointer, 0)
-        timestamp = unpack('<Q', nsx_file.datafile.read(8))[0]
+        timestamp = unpack(ts_fmt, nsx_file.datafile.read(ts_size))[0]
         packet_points = unpack('<I', nsx_file.datafile.read(4))[0]
 
         yield timestamp, packet_points

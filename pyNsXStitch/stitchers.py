@@ -5,16 +5,20 @@ from struct import calcsize, unpack, pack
 import numpy as np
 from brpylib import NsxFile, NevFile
 from brpylib.brpylib import ELEC_ID_DEF, check_elecid, check_dataelecid, NSX_BASIC_HEADER_BYTES_22, \
-    NSX_EXT_HEADER_BYTES_22
+    NSX_EXT_HEADER_BYTES_22, nev_header_dict
 
-from pyNsXStitch.streamers import iter_nsx_timestamps, stream_nev_packets, stream_nsx_data
-
+from pyNsXStitch.streamers import (
+    iter_nsx_timestamps,
+    stream_nev_packets,
+    stream_nsx_data,
+    nsx_timestamp_fmt,
+)
 
 class StitchedNeVFile(object):
 
     meta_size = 8 + 2
-    create_file_loc = 8 + 2*2 + 4*4 + 16
-    basic_header_size = create_file_loc + 32 + 256 + 4
+    # On-disk size (bytes) of the NEV basic header, derived from brpylib's own field layout
+    basic_header_size = calcsize('<' + ''.join(fmt for _, fmt, _ in nev_header_dict['basic']))
 
     def __init__(self, files_to_stitch, start=None, end=None):
         self.files = files_to_stitch
@@ -249,7 +253,7 @@ class StitchedNsXFile(object):
                 else:
                     # Write this packet as a new packets
                     out_file.write(b'\x01')
-                    out_file.write(pack('<Q', start_ts))
+                    out_file.write(pack(self.ts_fmt, start_ts))
                     prev_n_points_loc = out_file.tell()  # Save this data location for future reference
                     out_file.write(pack('<I', n_points))
                     last_ts = start_ts  # Reset the ts counter to the start of this packet
