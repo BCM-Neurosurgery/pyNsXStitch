@@ -8,12 +8,11 @@ anonymization changed only what it should:
   - the anonymized channel set MUST be a subset of the original (audio dropped),
     in the same order, with identical extended headers for the retained channels
 
-Usage:
-    python examples/check_anonymized.py ORIGINAL.ns3 ANONYMIZED.ns3
-    python examples/check_anonymized.py ORIGINAL.nev ANONYMIZED.nev
+This is a helper for spot-checking anonymization output, not a guarantee that all
+PHI has been removed. Run with --help for invocation details.
 """
-import sys
 import hashlib
+import argparse
 
 import numpy as np
 from brpylib import NsxFile, NevFile
@@ -157,14 +156,21 @@ def run(orig_path, anon_path):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        print(__doc__)
-        sys.exit(2)
+    arg_parser = argparse.ArgumentParser(
+        description='Compare an anonymized NeV/NsX file against its original and report '
+                    'whether anonymization changed only what it should. Exits 0 if all '
+                    'checks pass, 1 otherwise.'
+    )
+    arg_parser.add_argument('original', type=str,
+                            help='Path to the original (pre-anonymization) .nev/.nsX file')
+    arg_parser.add_argument('anonymized', type=str,
+                            help='Path to the anonymized .nev/.nsX file to check')
+    args = arg_parser.parse_args()
 
-    # `orig` and `anon` are left open in module scope below so you can set a
-    # breakpoint on the `pass` line and inspect both files in memory.
-    orig, anon, all_ok = run(sys.argv[1], sys.argv[2])
+    # `orig` and `anon` are left open in module scope so you can set a breakpoint on
+    # the `pass` line and inspect both files in memory.
+    orig, anon, all_ok = run(args.original, args.anonymized)
 
     pass  # <-- breakpoint here: inspect `orig` / `anon` (basic_header, extended_headers, ...)
 
-    sys.exit(0 if all_ok else 1)
+    raise SystemExit(0 if all_ok else 1)
