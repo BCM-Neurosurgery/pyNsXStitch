@@ -119,7 +119,7 @@ def get_nsx_filetypes(streamed_files, nsp_id):
         nsx_file = NsxFile(streamed_files[nsp_id][option])
         freqs.append(int(nsx_file.basic_header['SampleResolution'] / nsx_file.basic_header['Period']))
     combo = list(zip(options, freqs))
-    return sorted(combo, key=lambda x: x[1])  # TODO: this should probably
+    return sorted(combo, key=lambda x: x[1])
 
 def get_toc_mode_start(toc_dir, prefer_nev=True, nsx_filetype=None, nsp_id=None,):
     """Get the start of a toc mode recording both in UTC and BRK units"""
@@ -132,7 +132,9 @@ def get_toc_mode_start(toc_dir, prefer_nev=True, nsx_filetype=None, nsp_id=None,
     else:
         # pick the nsx filetype with the highest available sampling rate
         nsx_type = get_nsx_filetypes(streamed)[-1] if nsx_filetype is None else nsx_filetype
-        first_file = NsxFile(streamed[nsp_id][nsx_type][0])
+        nsx_filepath = streamed[nsp_id][nsx_type][0]
+        first_file = NsxFile(nsx_filepath)
+        brk_start = get_nsx_start_timestamp[nsx_filepath]
 
     ts_freq = first_file.basic_header['TimeStampResolution']
     utc_start = first_file.basic_header['TimeOrigin']
