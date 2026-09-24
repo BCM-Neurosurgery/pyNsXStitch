@@ -111,6 +111,57 @@ def get_nsx_start_timestamp(nsx_filepath):
     finally:
         del nsx
 
+def get_nsx_filetypes(streamed_files, nsp_id):
+    """get a list of available nsx filetypes sorted by the sampling freqeuncy"""
+    options = list(streamed_files[nsp_id].keys())
+    freqs = []
+    for option in options:
+        nsx_file = NsxFile(streamed_files[nsp_id][option])
+        freqs.append(int(nsx_file.basic_header['SampleResolution'] / nsx_file.basic_header['Period']))
+    combo = list(zip(options, freqs))
+    return sorted(combo, key=lambda x: x[1])  # TODO: this should probably
+
+def get_toc_mode_start(toc_dir, prefer_nev=True, nsx_filetype=None, nsp_id=None,):
+    """Get the start of a toc mode recording both in UTC and BRK units"""
+    streamed = get_all_streamed_files(toc_dir)
+    nsp_id = min(list(streamed.keys())) if nsp_id is None else nsp_id
+
+    if prefer_nev:
+        first_file = NevFile(streamed[nsp_id]['NeV'][0])
+        brk_start = get_nev_rec_start(first_file)
+    else:
+        # pick the nsx filetype with the highest available sampling rate
+        nsx_type = get_nsx_filetypes(streamed)[-1] if nsx_filetype is None else nsx_filetype
+        first_file = NsxFile(streamed[nsp_id][nsx_type][0])
+
+    ts_freq = first_file.basic_header['TimeStampResolution']
+    utc_start = first_file.basic_header['TimeOrigin']
+
+    return utc_start, brk_start, ts_freq
+
+
+def brk_toc_ticks_to_utc(ticks, toc_dir=None, toc_start_utc=None, toc_start_brk=None):
+    """Function to convert a BRK clock tick from within a TOC mode recording to a UTC timestamp"""
+
+    if toc_start_utc and toc_start_brk:
+        print('Using passed TOC timing information')
+
+    elif toc_dir:
+        toc_start_utc, toc_start_brk, ts_freq = get_toc_mode_start(toc_dir)
+
+    # TODO: should be able to do the same sort of accounting using the first UTC time in a file and firs BRK timestamp
+    # in the file, but this is only guaranteed to work w/ 30kHz NsX, other file types may not have a datapoint at the
+    # very start of a file to know the BRK to UTC mapping
+
+    else:  #  toc_dir is None and (toc_start_utc is None or toc_start_brk is None):
+        raise ValueError('Not enough information was given to reconstruc the UTC time! \n'
+                         'Must include either the path to the directory with the original TOC mode recording'
+                         'or the start of the TOC mode recording as both UTC and BRK timestamps')
+
+    since_start = (ticks - toc_start_brk) / ts_freq
+    utc_time = toc_start_utc + since_start
+    return utc_time
+
 
 def find_nsx_in_range(nsx_filepaths, start_ts, end_ts, subtract_offset=False):
     """Find all nsx files that contain data in the given range (time elapsed in seconds)"""
