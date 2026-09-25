@@ -160,7 +160,7 @@ def brk_toc_ticks_to_utc(ticks, toc_dir=None, toc_start_utc=None, toc_start_brk=
                          'Must include either the path to the directory with the original TOC mode recording'
                          'or the start of the TOC mode recording as both UTC and BRK timestamps and a timestamp freq!')
 
-    since_start = (ticks - toc_start_brk) / ts_freq
+    since_start = pd.Timedelta((ticks - toc_start_brk) / ts_freq, unit='s')
     utc_time = toc_start_utc + since_start
     return utc_time
 
