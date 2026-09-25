@@ -149,7 +149,7 @@ def brk_toc_ticks_to_utc(ticks, toc_dir=None, toc_start_utc=None, toc_start_brk=
         print('Using passed TOC timing information')
 
     elif toc_dir:
-        toc_start_utc, toc_start_brk, ts_freq = get_toc_mode_start(toc_dir)
+        toc_start_utc, toc_start_brk, toc_ts_freq = get_toc_mode_start(toc_dir)
 
     # TODO: should be able to do the same sort of accounting using the first UTC time in a file and firs BRK timestamp
     # in the file, but this is only guaranteed to work w/ 30kHz NsX, other file types may not have a datapoint at the
@@ -160,7 +160,7 @@ def brk_toc_ticks_to_utc(ticks, toc_dir=None, toc_start_utc=None, toc_start_brk=
                          'Must include either the path to the directory with the original TOC mode recording'
                          'or the start of the TOC mode recording as both UTC and BRK timestamps and a timestamp freq!')
 
-    since_start = pd.Timedelta((ticks - toc_start_brk) / ts_freq, unit='s')
+    since_start = pd.Timedelta((ticks - toc_start_brk) / toc_ts_freq, unit='s')
     utc_time = toc_start_utc + since_start
     return utc_time
 
