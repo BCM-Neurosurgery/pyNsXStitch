@@ -142,11 +142,12 @@ def get_toc_mode_start(toc_dir, prefer_nev=True, nsx_filetype=None, nsp_id=None,
     return utc_start, brk_start, ts_freq
 
 
-def brk_toc_ticks_to_utc(ticks, toc_dir=None, toc_start_utc=None, toc_start_brk=None, toc_ts_freq=None):
+def brk_toc_ticks_to_utc(ticks, toc_dir=None, toc_start_utc=None, toc_start_brk=None, toc_ts_freq=None, verbose=False):
     """Function to convert a BRK clock tick from within a TOC mode recording to a UTC timestamp"""
 
     if toc_start_utc and toc_start_brk and toc_ts_freq:
-        print('Using passed TOC timing information')
+        if verbose:
+            print('Using passed TOC timing information')
 
     elif toc_dir:
         toc_start_utc, toc_start_brk, toc_ts_freq = get_toc_mode_start(toc_dir)
@@ -174,7 +175,6 @@ def find_nsx_in_range(nsx_filepaths, start_ts, end_ts, subtract_offset=False):
     # Files are now sorted by file_start
     for nsx_fp in sorted_filepaths:
         file_start = get_nsx_start_timestamp(nsx_fp)
-
         #                  |                                 |
         #                  start_ts                          end_ts 
         #  |                   | 
