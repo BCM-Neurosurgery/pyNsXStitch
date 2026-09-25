@@ -142,10 +142,10 @@ def get_toc_mode_start(toc_dir, prefer_nev=True, nsx_filetype=None, nsp_id=None,
     return utc_start, brk_start, ts_freq
 
 
-def brk_toc_ticks_to_utc(ticks, toc_dir=None, toc_start_utc=None, toc_start_brk=None):
+def brk_toc_ticks_to_utc(ticks, toc_dir=None, toc_start_utc=None, toc_start_brk=None, toc_ts_freq=None):
     """Function to convert a BRK clock tick from within a TOC mode recording to a UTC timestamp"""
 
-    if toc_start_utc and toc_start_brk:
+    if toc_start_utc and toc_start_brk and toc_ts_freq:
         print('Using passed TOC timing information')
 
     elif toc_dir:
@@ -158,7 +158,7 @@ def brk_toc_ticks_to_utc(ticks, toc_dir=None, toc_start_utc=None, toc_start_brk=
     else:  #  toc_dir is None and (toc_start_utc is None or toc_start_brk is None):
         raise ValueError('Not enough information was given to reconstruc the UTC time! \n'
                          'Must include either the path to the directory with the original TOC mode recording'
-                         'or the start of the TOC mode recording as both UTC and BRK timestamps')
+                         'or the start of the TOC mode recording as both UTC and BRK timestamps and a timestamp freq!')
 
     since_start = (ticks - toc_start_brk) / ts_freq
     utc_time = toc_start_utc + since_start
