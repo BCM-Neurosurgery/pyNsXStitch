@@ -136,6 +136,21 @@ class StitchedNsXFile(object):
                 type_here = origin.basic_header['FileTypeID']
                 raise TypeError(f'Only BRSMPGRP type NsX files are currently supported! (found {type_here})')
 
+            # Packet timestamps are re-packed in the origin file's format, so mixing
+            # 2.x (uint32) and 3.x (uint64) files would corrupt the output
+            self.ts_fmt = nsx_timestamp_fmt(origin)
+            for filename in self.files[1:]:
+                nsx_file = NsxFile(filename, verbose=False, interactive=False)
+                try:
+                    file_ts_fmt = nsx_timestamp_fmt(nsx_file)
+                finally:
+                    nsx_file.datafile.close()
+                if file_ts_fmt != self.ts_fmt:
+                    raise ValueError(
+                        f'Cannot stitch NsX files with different timestamp formats: {self.files[0]} uses '
+                        f'{self.ts_fmt!r} but {filename} uses {file_ts_fmt!r}'
+                    )
+
             bytes_in_headers = origin.basic_header['BytesInHeader']
             origin.datafile.seek(0, 0)
             headers = bytearray(origin.datafile.read(bytes_in_headers))
