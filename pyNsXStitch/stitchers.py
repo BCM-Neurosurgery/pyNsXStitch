@@ -1,3 +1,4 @@
+import warnings
 from datetime import datetime, timedelta
 from itertools import chain
 from struct import calcsize, unpack, pack
@@ -7,8 +8,11 @@ from brpylib import NsxFile, NevFile
 from brpylib.brpylib import ELEC_ID_DEF, check_elecid, check_dataelecid, NSX_BASIC_HEADER_BYTES_22, \
     NSX_EXT_HEADER_BYTES_22, nev_header_dict
 
+from pyNsXStitch.periods import find_nev_parts_in_range, find_nsx_parts_in_range
 from pyNsXStitch.streamers import (
+    iter_nsx_periods,
     iter_nsx_timestamps,
+    periods_in_window,
     stream_nev_packets,
     stream_nsx_data,
     nsx_timestamp_fmt,
@@ -20,19 +24,48 @@ class StitchedNeVFile(object):
     # On-disk size (bytes) of the NEV basic header, derived from brpylib's own field layout
     basic_header_size = calcsize('<' + ''.join(fmt for _, fmt, _ in nev_header_dict['basic']))
 
-    def __init__(self, files_to_stitch, start=None, end=None):
+    def __init__(self, files_to_stitch, start=None, end=None, period=None, parts=None):
+        """
+        :param files_to_stitch: NeV files to stitch. With period=, these must be all of the session's NeV files,
+            since the session period index counts over them
+        :param start: [optional] start of the window to stitch
+        :param end: [optional] end of the window to stitch
+        :param period: [optional] session period index (see periods.get_session_nev_periods). If None and a window
+            is given, the window must match only one session period, or AmbiguousWindowError is raised
+        :param parts: [optional] list of (filepath, file period index) to stitch, in order, e.g. from
+            helpers.get_session_periods so the NeV and NsX outputs cover the same stretches. A period index of None
+            reads the whole file. Overrides period=
+        """
         self.files = files_to_stitch
         self.start_timestamp = start
         self.end_timestamp = end
+        self.period = period
         self.skip_packet_ids = None
+        self._parts = list(parts) if parts is not None else None
+
+    def get_parts(self):
+        """List of (filepath, file period index) to stitch, in order. A period index of None reads the whole file"""
+        if self._parts is None:
+            if self.period is None and self.start_timestamp is None and self.end_timestamp is None:
+                self._parts = [(filename, None) for filename in self.files]  # No window, stitch everything
+            else:
+                parts = find_nev_parts_in_range(self.files, self.start_timestamp, self.end_timestamp, self.period)
+                self._parts = [(part.filepath, part.period) for part in parts]
+        return self._parts
 
     def get_max_packet_size(self):
-        packet_sizes = [NevFile(filename).basic_header['BytesInDataPackets'] for filename in self.files]
+        packet_sizes = []
+        for filename in self.files:
+            nev_file = NevFile(filename, verbose=False, interactive=False)
+            try:
+                packet_sizes.append(nev_file.basic_header['BytesInDataPackets'])
+            finally:
+                nev_file.datafile.close()
         print(f'Found {len(packet_sizes)} packets with sizes: {packet_sizes}')
         return max(packet_sizes)
 
     def iter_data(self, gui_updater=None, skip_duplicates=True):
-        """Iterate through all the data packets in a file"""
+        """Iterate through all the data packets in the selected stretches of the files"""
         max_packet = self.get_max_packet_size()
         if self.start_timestamp is not None and self.end_timestamp is not None:
             duration = self.end_timestamp - self.start_timestamp
@@ -41,33 +74,38 @@ class StitchedNeVFile(object):
 
         prev_meta, prev_data = [None, None], None
 
-        for file_i, filename in enumerate(self.files):
+        for filename, file_period in self.get_parts():
             nev_file = NevFile(filename, verbose=False, interactive=False)
-            streamer = stream_nev_packets(nev_file, start_ts=self.start_timestamp, end_ts=self.end_timestamp)
-            for meta, packet_data in streamer:
-                if gui_updater is not None and duration is not None:
-                    elapsed = meta[0] - self.start_timestamp
-                    gui_updater(100 * elapsed / duration)
+            try:
+                streamer = stream_nev_packets(nev_file, start_ts=self.start_timestamp, end_ts=self.end_timestamp,
+                                              period=file_period)
+                for meta, packet_data in streamer:
+                    if gui_updater is not None and duration is not None:
+                        elapsed = meta[0] - self.start_timestamp
+                        gui_updater(100 * elapsed / duration)
 
-                # Detect and skip some packets if we were asked to skip packets of this type
-                if self.skip_packet_ids is not None and meta[1] in self.skip_packet_ids:
-                    continue
+                    # Detect and skip some packets if we were asked to skip packets of this type
+                    if self.skip_packet_ids is not None and meta[1] in self.skip_packet_ids:
+                        continue
 
-                # Check if this packet is a duplicate of a previous packet right before yielding it
-                if skip_duplicates and np.all([prev_meta[i] == meta[i] for i in [0, 1]]) and packet_data == prev_data:
-                    continue  # Timestamp, packet type, and payload were all the same, skip this packet
+                    # Check if this packet is a duplicate of a previous packet right before yielding it
+                    if skip_duplicates and np.all([prev_meta[i] == meta[i] for i in [0, 1]]) and packet_data == prev_data:
+                        continue  # Timestamp, packet type, and payload were all the same, skip this packet
 
-                # Make sure that all packets from all files are the same size
-                n_bytes_to_pad = (max_packet - self.meta_size - len(packet_data))
-                padded_packet = packet_data + (b'\x00' * n_bytes_to_pad)
-                yield meta, padded_packet
-                prev_meta, prev_data = meta, packet_data
+                    # Make sure that all packets from all files are the same size
+                    n_bytes_to_pad = (max_packet - self.meta_size - len(packet_data))
+                    padded_packet = packet_data + (b'\x00' * n_bytes_to_pad)
+                    yield meta, padded_packet
+                    prev_meta, prev_data = meta, packet_data
+            finally:
+                nev_file.datafile.close()
 
     def write_headers(self, out_file):
         """"""
 
-        # Copy all the headers from the origin file
-        origin = NevFile(self.files[0], verbose=False, interactive=False)
+        # Copy all the headers from the origin file: the first one we stitch data from
+        parts = self.get_parts()
+        origin = NevFile(parts[0][0] if parts else self.files[0], verbose=False, interactive=False)
         origin.datafile.seek(0, 0)
         out_file.seek(0, 0)
 
@@ -94,12 +132,53 @@ class StitchedNsXFile(object):
     time_origin_loc = calcsize('<8s2BI16s256sII')
     time_origin_size = calcsize('<8H')
 
-    def __init__(self, files_to_stitch, start=None, end=None, aggressive_concat=False):
-
+    def __init__(self, files_to_stitch, start=None, end=None, aggressive_concat=False, period=None, parts=None):
+        """
+        :param files_to_stitch: NsX files of one type. With period=, these must be all of the session's files of
+            that type, since the session period index counts over them
+        :param start: [optional] start of the window to stitch
+        :param end: [optional] end of the window to stitch
+        :param aggressive_concat: merge adjacent packets with no sample gap
+        :param period: [optional] session period index (see periods.get_session_nsx_periods). If None and a window
+            is given, the window must match only one session period, or AmbiguousWindowError is raised
+        :param parts: [optional] list of (filepath, file period index) to stitch, in order, e.g. from
+            helpers.get_session_periods so the NeV and NsX outputs cover the same stretches. A period index of None
+            reads the whole file. Overrides period=
+        """
         self.files = files_to_stitch
         self.start_timestamp = start
         self.end_timestamp = end
         self.concat_packets = aggressive_concat
+        self.period = period
+        self._parts = list(parts) if parts is not None else None
+        self.first_data_part = None  # (filepath, file period index) that the first stitched sample came from
+        self.time_origin_note = None  # Set by write_headers when the output TimeOrigin had to be estimated
+
+    def get_parts(self):
+        """List of (filepath, file period index) to stitch, in order. A period index of None reads the whole file"""
+        if self._parts is None:
+            if self.period is None and self.start_timestamp is None and self.end_timestamp is None:
+                self._parts = [(filename, None) for filename in self.files]  # No window, stitch everything
+            else:
+                parts = find_nsx_parts_in_range(self.files, self.start_timestamp, self.end_timestamp, self.period)
+                self._parts = [(part.filepath, part.period) for part in parts]
+        return self._parts
+
+    def resolve_file_period(self, nsx_file, file_period):
+        """
+        Index (>= 0) of the clock period of nsx_file that stream_nsx_data reads first for this part, picked the same
+        way it does. Also returns the file's list of periods (as yielded by iter_nsx_periods)
+        """
+        periods = list(iter_nsx_periods(nsx_file))
+        if file_period is not None:
+            return file_period % len(periods), periods
+        windowed = self.start_timestamp is not None or self.end_timestamp is not None
+        if windowed and len(periods) > 1:
+            # stream_nsx_data raises if more than one period matches, so the first match is the only one
+            matches = periods_in_window([p[1:3] for p in periods], self.start_timestamp, self.end_timestamp)
+            if matches:
+                return matches[0], periods
+        return 0, periods  # The whole file is read, starting from its first period
 
     def iter_data(self, gui_updater=None):
         """
@@ -110,15 +189,18 @@ class StitchedNsXFile(object):
         duration = self.end_timestamp - self.start_timestamp \
             if self.end_timestamp is not None and self.start_timestamp is not None \
             else None
-        for file_i, filename in enumerate(self.files):
+        for filename, file_period in self.get_parts():
             nsx_file = NsxFile(filename, verbose=False, interactive=False)
             try:
                 streamer = stream_nsx_data(
                     nsx_file,
                     read_start_ts=self.start_timestamp,
-                    read_end_ts=self.end_timestamp
+                    read_end_ts=self.end_timestamp,
+                    period=file_period,
                 )
                 for meta, data_block in streamer:
+                    if self.first_data_part is None:
+                        self.first_data_part = (filename, file_period)
                     if gui_updater is not None and meta is not None and duration is not None:
                         elapsed = meta[0] - self.start_timestamp
                         gui_updater(100 * elapsed / duration)
@@ -128,13 +210,36 @@ class StitchedNsXFile(object):
 
     def write_headers(self, out_file, first_timestamp=None):
 
-        # Load an NsX file to pull headers from
-        origin = NsxFile(self.files[0], verbose=False, interactive=False)
+        # Load an NsX file to pull headers from: the first one we stitch data from
+        parts = self.get_parts()
+        if self.first_data_part is not None:
+            origin_file, origin_period = self.first_data_part
+        else:
+            origin_file, origin_period = parts[0] if parts else (self.files[0], None)
+        self.time_origin_note = None
+        origin = NsxFile(origin_file, verbose=False, interactive=False)
         try:
             # Verify that the NsX file is written in the supported format
             if origin.basic_header['FileTypeID'] != 'BRSMPGRP':
                 type_here = origin.basic_header['FileTypeID']
                 raise TypeError(f'Only BRSMPGRP type NsX files are currently supported! (found {type_here})')
+
+            # Packet timestamps are re-packed in the origin file's format, so mixing
+            # 2.x (uint32) and 3.x (uint64) files would corrupt the output
+            self.ts_fmt = nsx_timestamp_fmt(origin)
+            for filename in self.files:
+                if filename == origin_file:
+                    continue
+                nsx_file = NsxFile(filename, verbose=False, interactive=False)
+                try:
+                    file_ts_fmt = nsx_timestamp_fmt(nsx_file)
+                finally:
+                    nsx_file.datafile.close()
+                if file_ts_fmt != self.ts_fmt:
+                    raise ValueError(
+                        f'Cannot stitch NsX files with different timestamp formats: {origin_file} uses '
+                        f'{self.ts_fmt!r} but {filename} uses {file_ts_fmt!r}'
+                    )
 
             bytes_in_headers = origin.basic_header['BytesInHeader']
             origin.datafile.seek(0, 0)
@@ -166,9 +271,32 @@ class StitchedNsXFile(object):
                 if timestamp_resolution <= 0:
                     raise ValueError('NSx TimeStampResolution must be greater than zero')
 
+                # TimeOrigin is the wall time of the file's first packet, so it is only known for the file's first
+                # clock period. The offset must be taken within the clock period that first_timestamp is in, since
+                # timestamps from different periods can't be compared
+                elapsed_before = 0
+                origin_period, origin_periods = self.resolve_file_period(origin, origin_period)
+                if origin_period > 0:
+                    # This period began mid-file after a clock reset, and the time lost at each reset is unknown.
+                    # Estimate it from the file's TimeOrigin plus the data length of the earlier periods, which is
+                    # a lower bound on the true wall time
+                    earlier = origin_periods[:origin_period]
+                    elapsed_before = (earlier[0][2] - origin_timestamp) + sum(
+                        p_end - p_start for _, p_start, p_end, _, _ in earlier[1:]
+                    )
+                    origin_timestamp = origin_periods[origin_period][1]
+                    self.time_origin_note = (
+                        f'TimeOrigin is estimated: the stitched data starts in clock period {origin_period} of '
+                        f'{origin_file}, which began mid-file after an NSP clock reset. It was set to the file\'s '
+                        f'TimeOrigin plus the {elapsed_before / timestamp_resolution:.3f} s of data in the earlier '
+                        f'period(s), assuming no time passed at the reset(s), so it is a lower bound on the true '
+                        f'start time'
+                    )
+                    warnings.warn(self.time_origin_note)
+
                 # Keep packet timestamps on the global NSP clock while moving the
                 # copied file origin to the first sample in the stitched output.
-                timestamp_offset = first_timestamp - origin_timestamp
+                timestamp_offset = elapsed_before + first_timestamp - origin_timestamp
                 # Avoid float rounding; on-disk TimeOrigin precision is milliseconds.
                 offset_microseconds = (
                     timestamp_offset * 1_000_000 // timestamp_resolution
@@ -212,6 +340,12 @@ class StitchedNsXFile(object):
         )
         ts_per_sample = self.write_headers(out_file, first_timestamp=first_timestamp)
 
+        # Leave a note next to the output file saying that its TimeOrigin is only an estimate
+        out_path = getattr(out_file, 'name', None)
+        if self.time_origin_note is not None and isinstance(out_path, str):
+            with open(f'{out_path}.timeorigin.txt', 'w') as note_file:
+                note_file.write(self.time_origin_note + '\n')
+
         prev_loop_t = datetime.now()
         durations = []
         last_ts = None
@@ -226,13 +360,23 @@ class StitchedNsXFile(object):
                 print(f'Processing new packet Timestamp: {start_ts}  NPoints:{n_points}')
 
                 stitch_w_prev = False
-                if self.concat_packets and last_ts is not None:
-                    # We're running in agressive stitching mode, so check for data drops
+                if last_ts is not None:
+                    # last_ts already points at the next expected tick, so a seamless join has a gap of about 0
                     packet_gap_ts = start_ts - last_ts
                     print(f'  Packet gap: {packet_gap_ts}')
-                    if packet_gap_ts <= ts_per_sample:
+                    if self.concat_packets and abs(packet_gap_ts) < 0.5 * ts_per_sample:
+                        # We're running in agressive stitching mode and no samples were missed between packets
                         print(f'  Concatenating packets')
-                        stitch_w_prev = True  # No samples were missed between packets
+                        stitch_w_prev = True
+                    elif packet_gap_ts <= -0.5 * ts_per_sample:
+                        # Packets overlap; start a new packet so every sample keeps its true tick. The overlapping
+                        # samples are written twice and are not checked for matching data
+                        n_overlap = -packet_gap_ts / ts_per_sample
+                        warnings.warn(
+                            f'NSx packet at timestamp {start_ts} overlaps the previous packet by {-packet_gap_ts} '
+                            f'ticks (~{n_overlap:.1f} samples). Writing it as a new packet; the overlapping '
+                            f'samples will appear twice in the output'
+                        )
 
                 if stitch_w_prev:
                     # We write this packet as part of the previous packet, update the previous packet header with
@@ -259,7 +403,9 @@ class StitchedNsXFile(object):
                     last_ts = start_ts  # Reset the ts counter to the start of this packet
 
             out_file.write(data_block)
-            last_ts += len(data_block) * ts_per_sample  # Increment ts counter to timestamp of the last written point
+            if last_ts is not None:
+                # Increment ts counter to the expected timestamp of the next point
+                last_ts += len(data_block) * ts_per_sample
 
             loop_end = datetime.now()
             loop_duration = loop_end - prev_loop_t

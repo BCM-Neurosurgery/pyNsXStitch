@@ -14,9 +14,10 @@ from brpylib import NevFile
 from struct import unpack
 import xml.etree.ElementTree as xml
 from pyNsXStitch.stitchers import StitchedNsXFile, StitchedNeVFile
-from pyNsXStitch.helpers import get_all_nev_comments, get_all_streamed_files, get_nev_rec_start, \
+from pyNsXStitch.helpers import get_all_nev_comments, get_all_streamed_files, get_nev_rec_starts, \
     find_nsx_in_range, get_support_files
-from pyNsXStitch.streamers import stream_nev_packets
+from pyNsXStitch.periods import get_session_nev_periods
+from pyNsXStitch.streamers import stream_nev_packets, AmbiguousWindowError
 
 
 def run_stitch_async(gui):
@@ -34,6 +35,15 @@ def run_stitch_async(gui):
                       '  Are you sure it has been selected correctly?\n')
             return
 
+        # Find the NsX files to stitch before writing anything, so an ambiguous window fails early
+        nsx_files = {filetype: files for filetype, files in gui.streamed_files.items() if 'ns' in filetype.lower()}
+        try:
+            in_range = {filetype: find_nsx_in_range(files, start, end) for filetype, files in nsx_files.items()}
+        except AmbiguousWindowError as e:
+            gui.error('The NSP clock was reset during this recording, and the selected time range occurs more '
+                      f'than once. Stitch it with stitch_one_task(..., period=...) instead.\n  {e}\n')
+            return
+
         # Stitch the NeV files first
         gui.notify('Stitching NeV files...')
         gui.update_progressbar(0)
@@ -45,15 +55,14 @@ def run_stitch_async(gui):
 
         # Stitch each of the NsX filetypes
         gui.notify('Beginning NsX stitching...')
-        nsx_files = {filetype: files for filetype, files in gui.streamed_files.items() if 'ns' in filetype.lower()}
         for filetype, files in nsx_files.items():
             gui.update_progressbar(0)
             gui.notify(f'Stitching from {len(files)} {filetype} files')
-            in_range = find_nsx_in_range(files, start, end)
-            gui.notify(f'Found {len(in_range)} files in the selected time range')
-            if in_range:
+            gui.notify(f'Found {len(in_range[filetype])} files in the selected time range')
+            if in_range[filetype]:
                 nsx_start = datetime.now()
-                nsx_stitch = StitchedNsXFile(in_range, start, end, aggressive_concat=gui.aggressive_stitch.get())
+                nsx_stitch = StitchedNsXFile(in_range[filetype], start, end,
+                                             aggressive_concat=gui.aggressive_stitch.get())
                 with open(gui.get_out_filepath(filetype.lower()), 'wb+') as nsx_out:
                     nsx_stitch.write(nsx_out, gui_updater=gui.update_progressbar)
                 elapsed = (datetime.now() - nsx_start)
@@ -144,32 +153,64 @@ def load_dir_async(gui):
         gui.update_patient_id()
         gui.notify(f'Found {len(gui.streamed_files["NeV"])} NeV files')
 
-        # Iter through all the comment packets in all files
+        # Split the session's NeV files into clock periods. The NSP clock restarts at each period, so each period's
+        # elapsed times are measured from that period's own recording start
+        gui.notify(f'Finding clock periods in NeV...')
+        nev_filepaths = gui.streamed_files["NeV"]
+        session_periods = get_session_nev_periods(nev_filepaths)
+        session_period_of = {
+            (part.filepath, part.period): i
+            for i, session_period in enumerate(session_periods)
+            for part in session_period.parts
+        }
+
+        # Iter through all the comment packets in all files, period by period
         gui.notify(f'Loading comments from NeV...')
-        timestamps, comments, file_names = [], [], []
-        n_files = len(gui.streamed_files["NeV"])
-        for i, file in enumerate(gui.streamed_files["NeV"]):
+        timestamps, periods, comments, file_names = [], [], [], []
+        period_refs = {}  # Session period index -> timestamp elapsed times in that period are measured from
+        n_files = len(nev_filepaths)
+        for i, file in enumerate(nev_filepaths):
             nev = NevFile(file)
             gui.update_progressbar((i+1)/n_files*100)
-            for (ts, packet_id), raw_data in stream_nev_packets(nev, packet_type=65535):
-                timestamps.append(ts)
-                text_data = raw_data[6:]
-                comment = text_data.decode('ASCII').rstrip('\x00')  # TODO: handle other charsets
-                comments.append(comment)
-                file_names.append(os.path.basename(file)) # Store file name
-        
+            for rec_start in get_nev_rec_starts(nev):
+                # The first recording start in each session period is its reference
+                period_refs.setdefault(session_period_of[(file, rec_start.period)], rec_start.timestamp)
+            file_periods = sorted(file_period for fp, file_period in session_period_of if fp == file)
+            for file_period in file_periods:
+                session_period = session_period_of[(file, file_period)]
+                for (ts, packet_id), raw_data in stream_nev_packets(nev, packet_type=65535, period=file_period):
+                    timestamps.append(int(ts))
+                    periods.append(session_period)
+                    text_data = raw_data[6:]
+                    comment = text_data.decode('ASCII').rstrip('\x00')  # TODO: handle other charsets
+                    comments.append(comment)
+                    file_names.append(os.path.basename(file)) # Store file name
+
         gui.update_progressbar(100)
         gui.notify(f'Found {len(timestamps)} comments...')
 
-        # Convert to a dataframe for drawing to the GUI
-        timestamps = np.array(timestamps)
-        first_nev = NevFile(gui.streamed_files['NeV'][0])
-        gui.nev_start = get_nev_rec_start(first_nev)
+        # Periods with no recording start event are measured from their first packet instead
+        for i, session_period in enumerate(session_periods):
+            if i not in period_refs:
+                period_refs[i] = int(session_period.start_ts)
+                gui.warn(f'No recording start event found in clock period {i}. '
+                         f'Measuring its elapsed time from its first packet ({period_refs[i]}) instead.')
+        if len(session_periods) > 1:
+            gui.warn(f'Found {len(session_periods)} clock periods (the NSP clock was reset). '
+                     f'Time Elapsed is measured from the start of each comment\'s own period.')
+
+        # Convert to a dataframe for drawing to the GUI. Use int64, not uint64, so earlier timestamps give negative
+        # elapsed times instead of wrapping around
+        timestamps = np.array(timestamps, dtype=np.int64)
+        refs = np.array([period_refs[p] for p in periods], dtype=np.int64)
+        first_nev = NevFile(nev_filepaths[0])
+        gui.period_refs = period_refs
+        gui.nev_start = period_refs.get(0, 0)  # Manual time entry is relative to the first period
         gui.ts_freq = first_nev.basic_header['TimeStampResolution']
         gui.time_origin = first_nev.basic_header['TimeOrigin']
         cleaned_df = pd.DataFrame.from_dict({
             'Timestamp': timestamps,
-            'Time Elapsed': np.round((timestamps - gui.nev_start) / gui.ts_freq, 2),
+            'Time Elapsed': np.round((timestamps - refs) / gui.ts_freq, 2),
             'Comment': comments,
             'File Name': file_names
         })
@@ -212,6 +253,7 @@ class StitcherGUI(object):
         self.streamed_files = None
         self.ts_freq = None
         self.nev_start = None
+        self.period_refs = {}
         self.time_origin = None
         self.custom_name = None
 
