@@ -14,11 +14,38 @@ DATA_PAGING_SIZE = 1024**2
 NSX_PTP_TS_FMT = '<Q'
 NSX_LEGACY_TS_FMT = '<I'
 
+# A packet that starts more than this many seconds before the previous packet ended begins a new clock period.
+# Smaller backward steps (overlapping packets) stay in the same period
+RESET_TOL_S = 1.0
+
+
+class AmbiguousWindowError(ValueError):
+    """A time window matches more than one clock period (the NSP clock was reset), so pass period= to pick one"""
+
 
 def nsx_timestamp_fmt(nsx_file) -> str:
     """Struct format for this NsX file's per-packet timestamp field, based on its FileSpec major version."""
     major = int(str(nsx_file.basic_header['FileSpec']).split('.')[0])
     return NSX_PTP_TS_FMT if major >= 3 else NSX_LEGACY_TS_FMT
+
+def window_overlaps(period_start, period_end, start_ts=None, end_ts=None):
+    """Whether the period [period_start, period_end] overlaps the window [start_ts, end_ts]. None is an open bound"""
+    return (end_ts is None or period_start <= end_ts) and (start_ts is None or period_end >= start_ts)
+
+
+def periods_in_window(periods, start_ts=None, end_ts=None):
+    """Indices of the (start_ts, end_ts, ...) periods that overlap the window [start_ts, end_ts]"""
+    return [i for i, (p_start, p_end, *_) in enumerate(periods) if window_overlaps(p_start, p_end, start_ts, end_ts)]
+
+
+def ambiguous_window_error(periods, matches, start_ts, end_ts, source):
+    """Build the AmbiguousWindowError raised when a window matches more than one of the given periods"""
+    found = ', '.join(f'{i}: [{periods[i][0]}, {periods[i][1]}]' for i in matches)
+    return AmbiguousWindowError(
+        f'Window [{start_ts}, {end_ts}] matches {len(matches)} clock periods (timestamps reset) in {source}. '
+        f'Pass period= to choose one of them. Matching periods: {found}'
+    )
+
 
 def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
     """
@@ -88,7 +115,7 @@ def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
             yield (timestamp, packet_id), data.tobytes()
 
 
-def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
+def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None, period=None):
     """
     This function is used to save a subset of data based on electrode IDs, file sizing, or file data time.  If
     both file_time_s and file_size are passed, it will default to file_time_s and determine sizing accordingly.
@@ -97,10 +124,17 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
     out-of-memory constraints we do not copy the entire packet at once, but rather stream packet data out section by
     section. These sections are of fixe maximum size, and the size is set by DATA_PAGING_SIZE
 
+    If the file has more than one period (the NSP clock was reset mid-file, see iter_nsx_periods) the same
+    timestamps can occur in more than one of them. Without period=, the window must then match only one period,
+    and only that period is read. Files with a single period are read exactly as before.
+
     :param nsx_file:
     :param read_start_ts:  [optional]
     :param read_end_ts:    [optional]
+    :param period:         [optional] index into the file's list of periods (as yielded by iter_nsx_periods, e.g. -1
+                           for the last period). If given, only that period's packets are read
     :yield:
+    :raises AmbiguousWindowError: If period is None and the window matches more than one of the file's periods
     """
 
     # Initializations
@@ -114,13 +148,32 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
     nsx_file.datafile.seek(0, 0)
     section_size = (DATA_PAGING_SIZE // data_point_size) * data_point_size
 
-    # Navigating headers to make sure we end up at the start of the data in the file
-    end_of_header = nsx_file.basic_header["BytesInHeader"]
-    nsx_file.datafile.seek(end_of_header, 0)
+    # Work out which of the file's clock periods to read. With no window and no period, the whole file is read
+    windowed = read_start_ts is not None or read_end_ts is not None
+    if period is None and windowed:
+        periods = [(first_ts, end_ts) for _, first_ts, end_ts, _, _ in iter_nsx_periods(nsx_file)]
+        if len(periods) > 1:
+            matches = periods_in_window(periods, read_start_ts, read_end_ts)
+            if len(matches) > 1:
+                raise ambiguous_window_error(periods, matches, read_start_ts, read_end_ts, nsx_file.datafile.name)
+            if not matches:
+                return  # The window isn't in this file
+            period = matches[0]
+
+    # Navigating headers to make sure we end up at the start of the data in the file. If we're reading one period,
+    # read only from its first packet up to its last
+    read_from = nsx_file.basic_header["BytesInHeader"]
+    read_until = os.path.getsize(nsx_file.datafile.name)
+    if period is not None:
+        try:
+            _, _, _, read_from, last_packet_offset = list(iter_nsx_periods(nsx_file))[period]
+        except IndexError:
+            return  # This file doesn't have the requested period
+        read_until = last_packet_offset + 1
+    nsx_file.datafile.seek(read_from, 0)
 
     # For all file types, loop through all data packets, extracting data based on page sizing
-    file_size = os.path.getsize(nsx_file.datafile.name)
-    while nsx_file.datafile.tell() < file_size:
+    while nsx_file.datafile.tell() < read_until:
 
         # Get the time and length of this data packet
         nsx_file.datafile.seek(1, 1)
@@ -129,25 +182,39 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
         packet_start = nsx_file.datafile.tell()
         if packet_pts == 0:
             continue  # This packet is empty
+        packet_size = packet_pts*data_point_size
 
         # Determine whether we should read this packet from the file
         packet_end_ts = timestamp + int(round(packet_pts * ts_ratio))
-        if read_start_ts and packet_end_ts < read_start_ts:
-            packet_size = packet_pts*data_point_size
+        if read_start_ts is not None and packet_end_ts < read_start_ts:
             nsx_file.datafile.seek(packet_size, 1)
             continue  # This entire packet is before the read start timestamp. Move to the next packet
-        if read_end_ts and read_end_ts < timestamp:
+        if read_end_ts is not None and read_end_ts < timestamp:
             break  # This packet is past the end of the requested interval. Finish
 
-        # Determine the altered start of the read if the start timestamp is within this packet
-        start_ts = max(read_start_ts, timestamp) if read_start_ts else timestamp
-        n_points_to_skip = int(np.floor(abs(start_ts - timestamp) / ts_ratio))
+        # Determine the altered start of the read if the start timestamp is within this packet. Start at the first
+        # sample on or after read_start_ts, and report that sample's tick (not read_start_ts) as the packet start.
+        # Sample k sits at tick timestamp + round(k * ts_ratio); the floor is done in integers to avoid float error
+        # when ts_ratio is not a whole number (e.g. nanosecond PTP clocks)
+        start_ts = max(read_start_ts, timestamp) if read_start_ts is not None else timestamp
+        start_offset = start_ts - timestamp
+        n_points_to_skip = int((start_offset * sample_freq) // ts_freq)
+        if int(round(n_points_to_skip * ts_ratio)) < start_offset:
+            n_points_to_skip += 1
+        start_ts = timestamp + int(round(n_points_to_skip * ts_ratio))
         read_start = packet_start + n_points_to_skip * data_point_size
         nsx_file.datafile.seek(read_start, 0)
 
-        # Determine the altered end of the read in this packet if the end timestamp is in this packet
-        end_ts = min(read_end_ts, packet_end_ts) if read_end_ts else packet_end_ts
-        read_end = packet_start + int(np.ceil(abs(end_ts - timestamp)/ts_ratio)) * data_point_size
+        # Determine the altered end of the read in this packet if the end timestamp is in this packet.
+        # The window end is inclusive: the sample at end_ts is read. Clamp to the packet's sample count,
+        # since packet_end_ts is one sample period past the packet's last sample.
+        end_ts = min(read_end_ts, packet_end_ts) if read_end_ts is not None else packet_end_ts
+        end_offset = end_ts - timestamp
+        n_last_point = int((end_offset * sample_freq) // ts_freq)  # Index of the last sample on or before end_ts
+        if int(round((n_last_point + 1) * ts_ratio)) <= end_offset:
+            n_last_point += 1
+        n_end_points = min(n_last_point + 1, packet_pts)
+        read_end = packet_start + n_end_points * data_point_size
 
         # Determine the number of sections that will be needed to read all the data in this packet
         read_size = read_end - read_start
@@ -195,6 +262,14 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
             # Move the file pointer explicitly since np.memmap is unreliable
             nsx_file.datafile.seek(location + this_section_size, 0)
 
+        # The requested window ends within this packet. Finish. Strict since packet_end_ts is where the next
+        # packet's first sample would be, and the window end is inclusive
+        if read_end_ts is not None and read_end_ts < packet_end_ts:
+            break
+
+        # Move to the next packet header from the packet boundary, not from read_end
+        nsx_file.datafile.seek(packet_start + packet_pts * data_point_size, 0)
+
 
 def iter_nsx_timestamps(nsx_file):
     """Loop through and quickly read off all the packet headers in an NsX file"""
@@ -212,3 +287,48 @@ def iter_nsx_timestamps(nsx_file):
         yield timestamp, packet_points
 
         ts_pointer = nsx_file.datafile.tell() + (packet_points * data_point_size) + 1
+
+
+def iter_nsx_periods(nsx_file, tol_s=RESET_TOL_S):
+    """
+    Split the NsX file into clock periods.
+
+    A new period begins when a packet starts more than tol_s seconds before the previous packet ended (e.g. the
+    NSP clock was reset mid-file). Smaller backward steps (overlapping packets) and gaps that move forward in time
+    (e.g. pauses) stay in the same period. Empty packets are ignored.
+
+    :param nsx_file: NsxFile object (defined in brpylib.py)
+    :param tol_s:    [optional] {float} how far back (in seconds) a packet can start and stay in the same period
+    :yield: (period_index, first_ts, end_ts, first_packet_offset, last_packet_offset), in file order.
+        first_ts and end_ts are the period's lowest packet start and highest packet end, in the file's native
+        timestamp units (end_ts is one sample period past that packet's last sample). The offsets are the byte
+        positions in the file of the headers of the period's first and last packets
+    """
+    sample_freq = int(nsx_file.basic_header['SampleResolution'] / nsx_file.basic_header['Period'])
+    ts_freq = nsx_file.basic_header['TimeStampResolution']
+    ts_ratio = ts_freq / sample_freq
+    tol = tol_s * ts_freq
+    data_point_size = nsx_file.basic_header['ChannelCount'] * DATA_BYTE_SIZE
+    packet_header_size = 1 + calcsize(nsx_timestamp_fmt(nsx_file)) + 4
+
+    period = None
+    prev_end_ts = None
+    offset = nsx_file.basic_header['BytesInHeader']
+    for timestamp, packet_points in iter_nsx_timestamps(nsx_file):
+        packet_offset = offset
+        offset += packet_header_size + packet_points * data_point_size
+        if packet_points == 0:
+            continue  # This packet is empty
+        packet_end_ts = timestamp + int(round(packet_points * ts_ratio))
+        if prev_end_ts is None or timestamp < prev_end_ts - tol:
+            if period is not None:
+                yield tuple(period)
+            # Time went backwards, start a new period
+            period = [0 if period is None else period[0] + 1, timestamp, packet_end_ts, packet_offset, packet_offset]
+        else:
+            period[1] = min(period[1], timestamp)
+            period[2] = max(period[2], packet_end_ts)
+            period[4] = packet_offset
+        prev_end_ts = packet_end_ts
+    if period is not None:
+        yield tuple(period)
