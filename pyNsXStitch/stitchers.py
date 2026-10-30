@@ -8,7 +8,7 @@ from brpylib import NsxFile, NevFile
 from brpylib.brpylib import ELEC_ID_DEF, check_elecid, check_dataelecid, NSX_BASIC_HEADER_BYTES_22, \
     NSX_EXT_HEADER_BYTES_22, nev_header_dict
 
-from pyNsXStitch.periods import find_nsx_parts_in_range
+from pyNsXStitch.periods import find_nev_parts_in_range, find_nsx_parts_in_range
 from pyNsXStitch.streamers import (
     iter_nsx_periods,
     iter_nsx_timestamps,
@@ -23,19 +23,48 @@ class StitchedNeVFile(object):
     # On-disk size (bytes) of the NEV basic header, derived from brpylib's own field layout
     basic_header_size = calcsize('<' + ''.join(fmt for _, fmt, _ in nev_header_dict['basic']))
 
-    def __init__(self, files_to_stitch, start=None, end=None):
+    def __init__(self, files_to_stitch, start=None, end=None, period=None, parts=None):
+        """
+        :param files_to_stitch: NeV files to stitch. With period=, these must be all of the session's NeV files,
+            since the session period index counts over them
+        :param start: [optional] start of the window to stitch
+        :param end: [optional] end of the window to stitch
+        :param period: [optional] session period index (see periods.get_session_nev_periods). If None and a window
+            is given, the window must match only one session period, or AmbiguousWindowError is raised
+        :param parts: [optional] list of (filepath, file period index) to stitch, in order, e.g. from
+            helpers.get_session_periods so the NeV and NsX outputs cover the same stretches. A period index of None
+            reads the whole file. Overrides period=
+        """
         self.files = files_to_stitch
         self.start_timestamp = start
         self.end_timestamp = end
+        self.period = period
         self.skip_packet_ids = None
+        self._parts = list(parts) if parts is not None else None
+
+    def get_parts(self):
+        """List of (filepath, file period index) to stitch, in order. A period index of None reads the whole file"""
+        if self._parts is None:
+            if self.period is None and self.start_timestamp is None and self.end_timestamp is None:
+                self._parts = [(filename, None) for filename in self.files]  # No window, stitch everything
+            else:
+                parts = find_nev_parts_in_range(self.files, self.start_timestamp, self.end_timestamp, self.period)
+                self._parts = [(part.filepath, part.period) for part in parts]
+        return self._parts
 
     def get_max_packet_size(self):
-        packet_sizes = [NevFile(filename).basic_header['BytesInDataPackets'] for filename in self.files]
+        packet_sizes = []
+        for filename in self.files:
+            nev_file = NevFile(filename, verbose=False, interactive=False)
+            try:
+                packet_sizes.append(nev_file.basic_header['BytesInDataPackets'])
+            finally:
+                nev_file.datafile.close()
         print(f'Found {len(packet_sizes)} packets with sizes: {packet_sizes}')
         return max(packet_sizes)
 
     def iter_data(self, gui_updater=None, skip_duplicates=True):
-        """Iterate through all the data packets in a file"""
+        """Iterate through all the data packets in the selected stretches of the files"""
         max_packet = self.get_max_packet_size()
         if self.start_timestamp is not None and self.end_timestamp is not None:
             duration = self.end_timestamp - self.start_timestamp
@@ -44,33 +73,38 @@ class StitchedNeVFile(object):
 
         prev_meta, prev_data = [None, None], None
 
-        for file_i, filename in enumerate(self.files):
+        for filename, file_period in self.get_parts():
             nev_file = NevFile(filename, verbose=False, interactive=False)
-            streamer = stream_nev_packets(nev_file, start_ts=self.start_timestamp, end_ts=self.end_timestamp)
-            for meta, packet_data in streamer:
-                if gui_updater is not None and duration is not None:
-                    elapsed = meta[0] - self.start_timestamp
-                    gui_updater(100 * elapsed / duration)
+            try:
+                streamer = stream_nev_packets(nev_file, start_ts=self.start_timestamp, end_ts=self.end_timestamp,
+                                              period=file_period)
+                for meta, packet_data in streamer:
+                    if gui_updater is not None and duration is not None:
+                        elapsed = meta[0] - self.start_timestamp
+                        gui_updater(100 * elapsed / duration)
 
-                # Detect and skip some packets if we were asked to skip packets of this type
-                if self.skip_packet_ids is not None and meta[1] in self.skip_packet_ids:
-                    continue
+                    # Detect and skip some packets if we were asked to skip packets of this type
+                    if self.skip_packet_ids is not None and meta[1] in self.skip_packet_ids:
+                        continue
 
-                # Check if this packet is a duplicate of a previous packet right before yielding it
-                if skip_duplicates and np.all([prev_meta[i] == meta[i] for i in [0, 1]]) and packet_data == prev_data:
-                    continue  # Timestamp, packet type, and payload were all the same, skip this packet
+                    # Check if this packet is a duplicate of a previous packet right before yielding it
+                    if skip_duplicates and np.all([prev_meta[i] == meta[i] for i in [0, 1]]) and packet_data == prev_data:
+                        continue  # Timestamp, packet type, and payload were all the same, skip this packet
 
-                # Make sure that all packets from all files are the same size
-                n_bytes_to_pad = (max_packet - self.meta_size - len(packet_data))
-                padded_packet = packet_data + (b'\x00' * n_bytes_to_pad)
-                yield meta, padded_packet
-                prev_meta, prev_data = meta, packet_data
+                    # Make sure that all packets from all files are the same size
+                    n_bytes_to_pad = (max_packet - self.meta_size - len(packet_data))
+                    padded_packet = packet_data + (b'\x00' * n_bytes_to_pad)
+                    yield meta, padded_packet
+                    prev_meta, prev_data = meta, packet_data
+            finally:
+                nev_file.datafile.close()
 
     def write_headers(self, out_file):
         """"""
 
-        # Copy all the headers from the origin file
-        origin = NevFile(self.files[0], verbose=False, interactive=False)
+        # Copy all the headers from the origin file: the first one we stitch data from
+        parts = self.get_parts()
+        origin = NevFile(parts[0][0] if parts else self.files[0], verbose=False, interactive=False)
         origin.datafile.seek(0, 0)
         out_file.seek(0, 0)
 
@@ -97,7 +131,7 @@ class StitchedNsXFile(object):
     time_origin_loc = calcsize('<8s2BI16s256sII')
     time_origin_size = calcsize('<8H')
 
-    def __init__(self, files_to_stitch, start=None, end=None, aggressive_concat=False, period=None):
+    def __init__(self, files_to_stitch, start=None, end=None, aggressive_concat=False, period=None, parts=None):
         """
         :param files_to_stitch: NsX files of one type. With period=, these must be all of the session's files of
             that type, since the session period index counts over them
@@ -106,13 +140,16 @@ class StitchedNsXFile(object):
         :param aggressive_concat: merge adjacent packets with no sample gap
         :param period: [optional] session period index (see periods.get_session_nsx_periods). If None and a window
             is given, the window must match only one session period, or AmbiguousWindowError is raised
+        :param parts: [optional] list of (filepath, file period index) to stitch, in order, e.g. from
+            helpers.get_session_periods so the NeV and NsX outputs cover the same stretches. A period index of None
+            reads the whole file. Overrides period=
         """
         self.files = files_to_stitch
         self.start_timestamp = start
         self.end_timestamp = end
         self.concat_packets = aggressive_concat
         self.period = period
-        self._parts = None
+        self._parts = list(parts) if parts is not None else None
 
     def get_parts(self):
         """List of (filepath, file period index) to stitch, in order. A period index of None reads the whole file"""
