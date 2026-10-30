@@ -139,9 +139,16 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
         if read_end_ts is not None and read_end_ts < timestamp:
             break  # This packet is past the end of the requested interval. Finish
 
-        # Determine the altered start of the read if the start timestamp is within this packet
+        # Determine the altered start of the read if the start timestamp is within this packet. Start at the first
+        # sample on or after read_start_ts, and report that sample's tick (not read_start_ts) as the packet start.
+        # Sample k sits at tick timestamp + round(k * ts_ratio); the floor is done in integers to avoid float error
+        # when ts_ratio is not a whole number (e.g. nanosecond PTP clocks)
         start_ts = max(read_start_ts, timestamp) if read_start_ts is not None else timestamp
-        n_points_to_skip = int(np.floor(abs(start_ts - timestamp) / ts_ratio))
+        start_offset = start_ts - timestamp
+        n_points_to_skip = int((start_offset * sample_freq) // ts_freq)
+        if int(round(n_points_to_skip * ts_ratio)) < start_offset:
+            n_points_to_skip += 1
+        start_ts = timestamp + int(round(n_points_to_skip * ts_ratio))
         read_start = packet_start + n_points_to_skip * data_point_size
         nsx_file.datafile.seek(read_start, 0)
 
@@ -149,7 +156,11 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
         # The window end is inclusive: the sample at end_ts is read. Clamp to the packet's sample count,
         # since packet_end_ts is one sample period past the packet's last sample.
         end_ts = min(read_end_ts, packet_end_ts) if read_end_ts is not None else packet_end_ts
-        n_end_points = min(int(np.floor(abs(end_ts - timestamp) / ts_ratio)) + 1, packet_pts)
+        end_offset = end_ts - timestamp
+        n_last_point = int((end_offset * sample_freq) // ts_freq)  # Index of the last sample on or before end_ts
+        if int(round((n_last_point + 1) * ts_ratio)) <= end_offset:
+            n_last_point += 1
+        n_end_points = min(n_last_point + 1, packet_pts)
         read_end = packet_start + n_end_points * data_point_size
 
         # Determine the number of sections that will be needed to read all the data in this packet
