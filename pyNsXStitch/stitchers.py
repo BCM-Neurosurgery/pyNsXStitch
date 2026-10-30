@@ -12,6 +12,7 @@ from pyNsXStitch.periods import find_nev_parts_in_range, find_nsx_parts_in_range
 from pyNsXStitch.streamers import (
     iter_nsx_periods,
     iter_nsx_timestamps,
+    periods_in_window,
     stream_nev_packets,
     stream_nsx_data,
     nsx_timestamp_fmt,
@@ -150,6 +151,8 @@ class StitchedNsXFile(object):
         self.concat_packets = aggressive_concat
         self.period = period
         self._parts = list(parts) if parts is not None else None
+        self.first_data_part = None  # (filepath, file period index) that the first stitched sample came from
+        self.time_origin_note = None  # Set by write_headers when the output TimeOrigin had to be estimated
 
     def get_parts(self):
         """List of (filepath, file period index) to stitch, in order. A period index of None reads the whole file"""
@@ -160,6 +163,22 @@ class StitchedNsXFile(object):
                 parts = find_nsx_parts_in_range(self.files, self.start_timestamp, self.end_timestamp, self.period)
                 self._parts = [(part.filepath, part.period) for part in parts]
         return self._parts
+
+    def resolve_file_period(self, nsx_file, file_period):
+        """
+        Index (>= 0) of the clock period of nsx_file that stream_nsx_data reads first for this part, picked the same
+        way it does. Also returns the file's list of periods (as yielded by iter_nsx_periods)
+        """
+        periods = list(iter_nsx_periods(nsx_file))
+        if file_period is not None:
+            return file_period % len(periods), periods
+        windowed = self.start_timestamp is not None or self.end_timestamp is not None
+        if windowed and len(periods) > 1:
+            # stream_nsx_data raises if more than one period matches, so the first match is the only one
+            matches = periods_in_window([p[1:3] for p in periods], self.start_timestamp, self.end_timestamp)
+            if matches:
+                return matches[0], periods
+        return 0, periods  # The whole file is read, starting from its first period
 
     def iter_data(self, gui_updater=None):
         """
@@ -180,6 +199,8 @@ class StitchedNsXFile(object):
                     period=file_period,
                 )
                 for meta, data_block in streamer:
+                    if self.first_data_part is None:
+                        self.first_data_part = (filename, file_period)
                     if gui_updater is not None and meta is not None and duration is not None:
                         elapsed = meta[0] - self.start_timestamp
                         gui_updater(100 * elapsed / duration)
@@ -191,7 +212,11 @@ class StitchedNsXFile(object):
 
         # Load an NsX file to pull headers from: the first one we stitch data from
         parts = self.get_parts()
-        origin_file, origin_period = parts[0] if parts else (self.files[0], None)
+        if self.first_data_part is not None:
+            origin_file, origin_period = self.first_data_part
+        else:
+            origin_file, origin_period = parts[0] if parts else (self.files[0], None)
+        self.time_origin_note = None
         origin = NsxFile(origin_file, verbose=False, interactive=False)
         try:
             # Verify that the NsX file is written in the supported format
@@ -242,21 +267,32 @@ class StitchedNsXFile(object):
                         'contains no non-empty data packets'
                     )
 
-                # TimeOrigin is the wall time of the file's first packet. If we stitch from a later clock period
-                # in the file, the clock reset in between, so count the earlier periods' durations instead
-                elapsed_before = 0
-                if origin_period:
-                    origin_periods = list(iter_nsx_periods(origin))[:origin_period + 1]
-                    elapsed_before = sum(p_end - p_start for _, p_start, p_end, _, _ in origin_periods[:-1])
-                    origin_timestamp = origin_periods[-1][1]
-                    warnings.warn(
-                        f'Stitching from clock period {origin_period} of {origin_file}; TimeOrigin is estimated '
-                        f'assuming no time passed at the clock reset(s) before it'
-                    )
-
                 timestamp_resolution = origin.basic_header['TimeStampResolution']
                 if timestamp_resolution <= 0:
                     raise ValueError('NSx TimeStampResolution must be greater than zero')
+
+                # TimeOrigin is the wall time of the file's first packet, so it is only known for the file's first
+                # clock period. The offset must be taken within the clock period that first_timestamp is in, since
+                # timestamps from different periods can't be compared
+                elapsed_before = 0
+                origin_period, origin_periods = self.resolve_file_period(origin, origin_period)
+                if origin_period > 0:
+                    # This period began mid-file after a clock reset, and the time lost at each reset is unknown.
+                    # Estimate it from the file's TimeOrigin plus the data length of the earlier periods, which is
+                    # a lower bound on the true wall time
+                    earlier = origin_periods[:origin_period]
+                    elapsed_before = (earlier[0][2] - origin_timestamp) + sum(
+                        p_end - p_start for _, p_start, p_end, _, _ in earlier[1:]
+                    )
+                    origin_timestamp = origin_periods[origin_period][1]
+                    self.time_origin_note = (
+                        f'TimeOrigin is estimated: the stitched data starts in clock period {origin_period} of '
+                        f'{origin_file}, which began mid-file after an NSP clock reset. It was set to the file\'s '
+                        f'TimeOrigin plus the {elapsed_before / timestamp_resolution:.3f} s of data in the earlier '
+                        f'period(s), assuming no time passed at the reset(s), so it is a lower bound on the true '
+                        f'start time'
+                    )
+                    warnings.warn(self.time_origin_note)
 
                 # Keep packet timestamps on the global NSP clock while moving the
                 # copied file origin to the first sample in the stitched output.
@@ -303,6 +339,12 @@ class StitchedNsXFile(object):
             else None
         )
         ts_per_sample = self.write_headers(out_file, first_timestamp=first_timestamp)
+
+        # Leave a note next to the output file saying that its TimeOrigin is only an estimate
+        out_path = getattr(out_file, 'name', None)
+        if self.time_origin_note is not None and isinstance(out_path, str):
+            with open(f'{out_path}.timeorigin.txt', 'w') as note_file:
+                note_file.write(self.time_origin_note + '\n')
 
         prev_loop_t = datetime.now()
         durations = []
