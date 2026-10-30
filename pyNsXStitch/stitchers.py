@@ -8,7 +8,9 @@ from brpylib import NsxFile, NevFile
 from brpylib.brpylib import ELEC_ID_DEF, check_elecid, check_dataelecid, NSX_BASIC_HEADER_BYTES_22, \
     NSX_EXT_HEADER_BYTES_22, nev_header_dict
 
+from pyNsXStitch.periods import find_nsx_parts_in_range
 from pyNsXStitch.streamers import (
+    iter_nsx_periods,
     iter_nsx_timestamps,
     stream_nev_packets,
     stream_nsx_data,
@@ -95,12 +97,32 @@ class StitchedNsXFile(object):
     time_origin_loc = calcsize('<8s2BI16s256sII')
     time_origin_size = calcsize('<8H')
 
-    def __init__(self, files_to_stitch, start=None, end=None, aggressive_concat=False):
-
+    def __init__(self, files_to_stitch, start=None, end=None, aggressive_concat=False, period=None):
+        """
+        :param files_to_stitch: NsX files of one type. With period=, these must be all of the session's files of
+            that type, since the session period index counts over them
+        :param start: [optional] start of the window to stitch
+        :param end: [optional] end of the window to stitch
+        :param aggressive_concat: merge adjacent packets with no sample gap
+        :param period: [optional] session period index (see periods.get_session_nsx_periods). If None and a window
+            is given, the window must match only one session period, or AmbiguousWindowError is raised
+        """
         self.files = files_to_stitch
         self.start_timestamp = start
         self.end_timestamp = end
         self.concat_packets = aggressive_concat
+        self.period = period
+        self._parts = None
+
+    def get_parts(self):
+        """List of (filepath, file period index) to stitch, in order. A period index of None reads the whole file"""
+        if self._parts is None:
+            if self.period is None and self.start_timestamp is None and self.end_timestamp is None:
+                self._parts = [(filename, None) for filename in self.files]  # No window, stitch everything
+            else:
+                parts = find_nsx_parts_in_range(self.files, self.start_timestamp, self.end_timestamp, self.period)
+                self._parts = [(part.filepath, part.period) for part in parts]
+        return self._parts
 
     def iter_data(self, gui_updater=None):
         """
@@ -111,13 +133,14 @@ class StitchedNsXFile(object):
         duration = self.end_timestamp - self.start_timestamp \
             if self.end_timestamp is not None and self.start_timestamp is not None \
             else None
-        for file_i, filename in enumerate(self.files):
+        for filename, file_period in self.get_parts():
             nsx_file = NsxFile(filename, verbose=False, interactive=False)
             try:
                 streamer = stream_nsx_data(
                     nsx_file,
                     read_start_ts=self.start_timestamp,
-                    read_end_ts=self.end_timestamp
+                    read_end_ts=self.end_timestamp,
+                    period=file_period,
                 )
                 for meta, data_block in streamer:
                     if gui_updater is not None and meta is not None and duration is not None:
@@ -129,8 +152,10 @@ class StitchedNsXFile(object):
 
     def write_headers(self, out_file, first_timestamp=None):
 
-        # Load an NsX file to pull headers from
-        origin = NsxFile(self.files[0], verbose=False, interactive=False)
+        # Load an NsX file to pull headers from: the first one we stitch data from
+        parts = self.get_parts()
+        origin_file, origin_period = parts[0] if parts else (self.files[0], None)
+        origin = NsxFile(origin_file, verbose=False, interactive=False)
         try:
             # Verify that the NsX file is written in the supported format
             if origin.basic_header['FileTypeID'] != 'BRSMPGRP':
@@ -140,7 +165,9 @@ class StitchedNsXFile(object):
             # Packet timestamps are re-packed in the origin file's format, so mixing
             # 2.x (uint32) and 3.x (uint64) files would corrupt the output
             self.ts_fmt = nsx_timestamp_fmt(origin)
-            for filename in self.files[1:]:
+            for filename in self.files:
+                if filename == origin_file:
+                    continue
                 nsx_file = NsxFile(filename, verbose=False, interactive=False)
                 try:
                     file_ts_fmt = nsx_timestamp_fmt(nsx_file)
@@ -148,7 +175,7 @@ class StitchedNsXFile(object):
                     nsx_file.datafile.close()
                 if file_ts_fmt != self.ts_fmt:
                     raise ValueError(
-                        f'Cannot stitch NsX files with different timestamp formats: {self.files[0]} uses '
+                        f'Cannot stitch NsX files with different timestamp formats: {origin_file} uses '
                         f'{self.ts_fmt!r} but {filename} uses {file_ts_fmt!r}'
                     )
 
@@ -178,13 +205,25 @@ class StitchedNsXFile(object):
                         'contains no non-empty data packets'
                     )
 
+                # TimeOrigin is the wall time of the file's first packet. If we stitch from a later clock period
+                # in the file, the clock reset in between, so count the earlier periods' durations instead
+                elapsed_before = 0
+                if origin_period:
+                    origin_periods = list(iter_nsx_periods(origin))[:origin_period + 1]
+                    elapsed_before = sum(p_end - p_start for _, p_start, p_end, _, _ in origin_periods[:-1])
+                    origin_timestamp = origin_periods[-1][1]
+                    warnings.warn(
+                        f'Stitching from clock period {origin_period} of {origin_file}; TimeOrigin is estimated '
+                        f'assuming no time passed at the clock reset(s) before it'
+                    )
+
                 timestamp_resolution = origin.basic_header['TimeStampResolution']
                 if timestamp_resolution <= 0:
                     raise ValueError('NSx TimeStampResolution must be greater than zero')
 
                 # Keep packet timestamps on the global NSP clock while moving the
                 # copied file origin to the first sample in the stitched output.
-                timestamp_offset = first_timestamp - origin_timestamp
+                timestamp_offset = elapsed_before + first_timestamp - origin_timestamp
                 # Avoid float rounding; on-disk TimeOrigin precision is milliseconds.
                 offset_microseconds = (
                     timestamp_offset * 1_000_000 // timestamp_resolution

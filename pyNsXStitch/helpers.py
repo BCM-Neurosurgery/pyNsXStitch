@@ -15,8 +15,10 @@ from struct import pack, unpack, calcsize
 
 import pandas as pd
 
+from pyNsXStitch.periods import find_nsx_parts_in_range, get_session_nsx_periods, select_session_parts
 from pyNsXStitch.stitchers import StitchedNeVFile, StitchedNsXFile
-from pyNsXStitch.streamers import stream_nev_packets, iter_nsx_timestamps, stream_nsx_data, nsx_timestamp_fmt
+from pyNsXStitch.streamers import stream_nev_packets, iter_nsx_timestamps, iter_nsx_periods, stream_nsx_data, \
+    nsx_timestamp_fmt
 
 nsx_copy_headers = []
 REC_EVENT_PACKET_ID = 65529
@@ -83,34 +85,17 @@ def get_support_files(directory, full_paths=False):
 
 def get_nsx_periods(nsx_filepath):
     """
-    Split the NsX file into periods of monotonically increasing timestamps.
-
-    A new period begins whenever a packet's timestamp is earlier than the previous packet's (e.g. the NSP clock
-    was reset mid-file). Gaps between packets that move forward in time (e.g. pauses) stay in the same period.
-    Empty packets are ignored.
+    Split the NsX file into clock periods (see streamers.iter_nsx_periods).
 
     :param nsx_filepath: path of the NsX file
     :return: list of (start_ts, end_ts) tuples in the file's native timestamp units, in file order. end_ts is the
         end of the period's last packet (one sample period past its last sample)
     """
     nsx_file = NsxFile(nsx_filepath, verbose=False, interactive=False)
-    sample_freq = int(nsx_file.basic_header['SampleResolution'] / nsx_file.basic_header['Period'])
-    ts_freq = nsx_file.basic_header['TimeStampResolution']
-
-    periods = []
-    prev_ts = None
-    for timestamp, packet_points in iter_nsx_timestamps(nsx_file):
-        if packet_points == 0:
-            continue  # This packet is empty
-        packet_end_ts = timestamp + int(packet_points * ts_freq / sample_freq)
-        if prev_ts is None or timestamp < prev_ts:
-            periods.append([timestamp, packet_end_ts])  # Time went backwards, start a new period
-        else:
-            periods[-1][1] = packet_end_ts
-        prev_ts = timestamp
-
-    del nsx_file
-    return [tuple(period) for period in periods]
+    try:
+        return [(first_ts, end_ts) for _, first_ts, end_ts, _, _ in iter_nsx_periods(nsx_file)]
+    finally:
+        nsx_file.datafile.close()
 
 
 def get_nsx_duration(nsx_filepath):
@@ -159,41 +144,17 @@ def find_nsx_in_range(nsx_filepaths, start_ts, end_ts, subtract_offset=False, pe
     """
     Find all nsx files that contain data in the given range (time elapsed in seconds)
 
-    A file is in range if any of its periods (see get_nsx_periods) overlaps [start_ts, end_ts]. Files are returned
-    sorted by their starting timestamps.
+    The files are treated as one session, and split into clock periods counted in filename order (see
+    periods.get_session_nsx_periods). A file is in range if its share of the selected session period overlaps
+    [start_ts, end_ts]. Files are returned in filename order.
 
-    :param period: [optional] index into each file's list of periods (e.g. -1 for the last period). If given, only
-        that period is tested, and files without that period are skipped. If None, every period is tested
+    :param nsx_filepaths: paths of all the session's NsX files of one type
+    :param period: [optional] session period index (e.g. -1 for the last period). If None, the range must match
+        only one session period
+    :raises AmbiguousWindowError: If period is None and the range matches more than one session period
     """
-    files = []
-    # Sort files by starting timestamps in ascending order
-    sorted_filepaths = sorted(nsx_filepaths, key=get_nsx_start_timestamp)
-
-    for nsx_fp in sorted_filepaths:
-        all_periods = get_nsx_periods(nsx_fp)
-        periods = all_periods
-        if period is not None:
-            try:
-                periods = [all_periods[period]]
-            except IndexError:
-                continue  # This file doesn't have the requested period
-
-        #                  |                                 |
-        #                  start_ts                          end_ts
-        #  |                   |
-        #  period_start        period_end
-
-        # A period overlaps the range if it starts at or before end_ts and ends at or after start_ts.
-        # Periods aren't ordered in time across (or within) files, so every file has to be checked
-        if any(period_start <= end_ts and period_end >= start_ts for period_start, period_end in periods):
-            # stream_nsx_data assumes timestamps only increase, so data from a multi-period file may be incomplete
-            # or out of order once stitched
-            if len(all_periods) > 1:
-                warnings.warn(f'NsX file in range has {len(all_periods)} periods (timestamps reset mid-file); '
-                              f'stitched data from it may be incomplete or out of order. \n  {nsx_fp}')
-            files.append(nsx_fp)
-
-    return files
+    parts = find_nsx_parts_in_range(nsx_filepaths, start_ts, end_ts, period=period)
+    return [part.filepath for part in parts]
 
 
 def get_time_in_file(nsx_file, timestamp):
@@ -459,7 +420,27 @@ def write_one_nsx_file(nsx_file: NsxFile, output_path: str, keep_indices=None):
     print(f'Saved anonymized file to {output_path}')
 
 
-def stitch_one_task(streamed_files, output_dir, task_name, start, end, aggressive=False):
+def stitch_one_task(streamed_files, output_dir, task_name, start, end, aggressive=False, period=None):
+    """
+    Stitch the window [start, end] out of a session's streamed files (as returned by get_all_streamed_files)
+
+    :param period: [optional] session period index (see periods.get_session_nsx_periods), counted separately over
+        each NsX file type. If None, the window must match only one session period
+    :raises AmbiguousWindowError: If period is None and the window matches more than one session period
+    """
+    # Find the NsX files to stitch before writing anything, so an ambiguous window fails early
+    nsx_files = {filetype: files for filetype, files in streamed_files.items() if 'ns' in filetype.lower()}
+    in_range, clock_reset = {}, False
+    for filetype, files in nsx_files.items():
+        sessions = get_session_nsx_periods(files)
+        clock_reset = clock_reset or len(sessions) > 1
+        in_range[filetype] = select_session_parts(sessions, start, end, period=period)
+        print(f'Found {len(in_range[filetype])} of {len(files)} {filetype} files in the selected time range')
+        if not in_range[filetype]:
+            raise IndexError('Could not find enough files to stitch!')
+    if clock_reset:
+        warnings.warn('The NSP clock was reset during this session. NeV packets are not split by clock period, '
+                      'so the stitched NeV file may include packets from other periods in the same time range')
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -472,17 +453,12 @@ def stitch_one_task(streamed_files, output_dir, task_name, start, end, aggressiv
 
     # Stitch each of the NsX filetypes
     print('Beginning NsX stitching...')
-    nsx_files = {filetype: files for filetype, files in streamed_files.items() if 'ns' in filetype.lower()}
     for filetype, files in nsx_files.items():
-        print(f'Stitching from {len(files)} {filetype} files')
-        in_range = find_nsx_in_range(files, start, end)
-        print(f'Found {len(in_range)} files in the selected time range')
-        if in_range:
-            nsx_stitch = StitchedNsXFile(in_range, start, end, aggressive_concat=aggressive)
-            with open(os.path.join(output_dir, f'{task_name}.{filetype.lower()}'), 'wb+') as nsx_out:
-                nsx_stitch.write(nsx_out)
-        else:
-            raise IndexError('Could not find enough files to stitch!')
+        print(f'Stitching from {len(in_range[filetype])} {filetype} files')
+        # Pass the whole session, since the session period index counts over all of its files
+        nsx_stitch = StitchedNsXFile(files, start, end, aggressive_concat=aggressive, period=period)
+        with open(os.path.join(output_dir, f'{task_name}.{filetype.lower()}'), 'wb+') as nsx_out:
+            nsx_stitch.write(nsx_out)
 
     print(f'Finished {task_name}')
 
