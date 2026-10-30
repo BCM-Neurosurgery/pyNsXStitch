@@ -19,10 +19,15 @@ import pandas as pd
 from pyNsXStitch.periods import find_nsx_parts_in_range, file_timestamp_resolution, iter_file_periods
 from pyNsXStitch.stitchers import StitchedNeVFile, StitchedNsXFile
 from pyNsXStitch.streamers import RESET_TOL_S, ambiguous_window_error, stream_nev_packets, iter_nsx_timestamps, \
-    iter_nsx_periods, stream_nsx_data, nsx_timestamp_fmt, periods_in_window, window_overlaps
+    iter_nsx_periods, stream_nsx_data, nsx_timestamp_fmt, periods_in_window, window_overlaps, iter_nev_pages, \
+    iter_nev_periods
 
 nsx_copy_headers = []
 REC_EVENT_PACKET_ID = 65529
+
+# A recording start event in a NeV file. period is the index of the file's clock period it is in (see
+# streamers.iter_nev_periods)
+RecStart = namedtuple('RecStart', ['period', 'timestamp'])
 
 _NSX_FILTER_CODES = {'none': 0, 'butterworth': 1, None: 0}
 
@@ -320,6 +325,31 @@ def get_nev_rec_start(nev_file):
         recording_start = None  # We didn't find any recording start packets
 
     return recording_start
+
+
+def get_nev_rec_starts(nev_file):
+    """
+    Find every recording start event in the NeV file.
+
+    When the NSP clock is reset the file can hold more than one recording start, each in its own clock period, so
+    each period's timestamps should be measured from that period's start.
+
+    :param nev_file: NevFile object (defined in brpylib.py)
+    :return: list of RecStarts (period, timestamp) in file order, with int timestamps. Empty if the file has no
+        recording start events
+    """
+    # Last packet index of each of the file's periods, to look up which period a packet is in
+    period_ends = np.array([last_packet for _, _, _, _, last_packet in iter_nev_periods(nev_file)], dtype=np.int64)
+
+    rec_starts = []
+    for start_idx, raw_data in iter_nev_pages(nev_file):
+        for i in np.flatnonzero(raw_data['packet_id'] == REC_EVENT_PACKET_ID):
+            event_type = unpack("<H", raw_data['data'][i][:2].tobytes())[0]
+            if event_type == 0:  # This is a recording start event
+                period = int(np.searchsorted(period_ends, start_idx + i))
+                rec_starts.append(RecStart(period, int(raw_data['timestamp'][i])))
+
+    return rec_starts
 
 
 def read_at(filepath, read_loc, n_bytes=10):
