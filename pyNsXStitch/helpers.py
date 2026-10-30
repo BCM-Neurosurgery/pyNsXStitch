@@ -81,25 +81,63 @@ def get_support_files(directory, full_paths=False):
     return support_files
 
 
+def get_nsx_periods(nsx_filepath):
+    """
+    Split the NsX file into periods of monotonically increasing timestamps.
+
+    A new period begins whenever a packet's timestamp is earlier than the previous packet's (e.g. the NSP clock
+    was reset mid-file). Gaps between packets that move forward in time (e.g. pauses) stay in the same period.
+    Empty packets are ignored.
+
+    :param nsx_filepath: path of the NsX file
+    :return: list of (start_ts, end_ts) tuples in the file's native timestamp units, in file order. end_ts is the
+        end of the period's last packet (one sample period past its last sample)
+    """
+    nsx_file = NsxFile(nsx_filepath, verbose=False, interactive=False)
+    sample_freq = int(nsx_file.basic_header['SampleResolution'] / nsx_file.basic_header['Period'])
+    ts_freq = nsx_file.basic_header['TimeStampResolution']
+
+    periods = []
+    prev_ts = None
+    for timestamp, packet_points in iter_nsx_timestamps(nsx_file):
+        if packet_points == 0:
+            continue  # This packet is empty
+        packet_end_ts = timestamp + int(packet_points * ts_freq / sample_freq)
+        if prev_ts is None or timestamp < prev_ts:
+            periods.append([timestamp, packet_end_ts])  # Time went backwards, start a new period
+        else:
+            periods[-1][1] = packet_end_ts
+        prev_ts = timestamp
+
+    del nsx_file
+    return [tuple(period) for period in periods]
+
+
 def get_nsx_duration(nsx_filepath):
-    """Get the duration of this data file in the file's native timestamp units"""
-    return get_nsx_end_timestamp(nsx_filepath) - get_nsx_start_timestamp(nsx_filepath)
+    """
+    Get the duration of this data file in the file's native timestamp units.
+
+    This is the sum of the lengths of each of the file's periods (see get_nsx_periods), so it is never negative,
+    even if the clock was reset mid-file.
+    """
+    return sum(end_ts - start_ts for start_ts, end_ts in get_nsx_periods(nsx_filepath))
 
 
 def get_nsx_end_timestamp(nsx_filepath):
-    """Return the end of the NsX file in time elapsed (seconds) since the recording start"""
-    nsx_file = NsxFile(nsx_filepath, verbose=False, interactive=False)
-    last_ts, packet_size = None, None
-    for timestamp, packet_points in iter_nsx_timestamps(nsx_file):
-        last_ts = timestamp
-        packet_size = packet_points
+    """
+    Return the end of the NsX file in time elapsed (seconds) since the recording start
 
-    sample_freq = int(nsx_file.basic_header['SampleResolution'] / nsx_file.basic_header['Period'])
-    ts_freq = nsx_file.basic_header['TimeStampResolution']
-    end_ts = last_ts + int(packet_size * ts_freq / sample_freq)
-
-    del nsx_file
-    return end_ts
+    Note: this is the end of the last packet in the file, i.e. the end of the file's last period. If the file has
+    more than one period (see get_nsx_periods), it may be earlier than the start timestamp of the file, as given by
+    get_nsx_start_timestamp, and a warning is issued.
+    """
+    periods = get_nsx_periods(nsx_filepath)
+    if not periods:
+        raise ValueError(f'Found no data packets in NsX file! \n  {nsx_filepath}')
+    if len(periods) > 1:
+        warnings.warn(f'NsX file has {len(periods)} periods (timestamps reset mid-file); returning the end of the '
+                      f'last period. \n  {nsx_filepath}')
+    return periods[-1][1]
 
 
 def get_nsx_start_timestamp(nsx_filepath):
