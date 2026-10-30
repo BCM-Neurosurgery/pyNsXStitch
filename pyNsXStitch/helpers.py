@@ -155,33 +155,44 @@ def get_nsx_start_timestamp(nsx_filepath):
         del nsx
 
 
-def find_nsx_in_range(nsx_filepaths, start_ts, end_ts, subtract_offset=False):
-    """Find all nsx files that contain data in the given range (time elapsed in seconds)"""
+def find_nsx_in_range(nsx_filepaths, start_ts, end_ts, subtract_offset=False, period=None):
+    """
+    Find all nsx files that contain data in the given range (time elapsed in seconds)
+
+    A file is in range if any of its periods (see get_nsx_periods) overlaps [start_ts, end_ts]. Files are returned
+    sorted by their starting timestamps.
+
+    :param period: [optional] index into each file's list of periods (e.g. -1 for the last period). If given, only
+        that period is tested, and files without that period are skipped. If None, every period is tested
+    """
     files = []
     # Sort files by starting timestamps in ascending order
     sorted_filepaths = sorted(nsx_filepaths, key=get_nsx_start_timestamp)
-    
-    # Files are now sorted by file_start
+
     for nsx_fp in sorted_filepaths:
-        file_start = get_nsx_start_timestamp(nsx_fp)
+        all_periods = get_nsx_periods(nsx_fp)
+        periods = all_periods
+        if period is not None:
+            try:
+                periods = [all_periods[period]]
+            except IndexError:
+                continue  # This file doesn't have the requested period
 
         #                  |                                 |
-        #                  start_ts                          end_ts 
-        #  |                   | 
-        #  file_start          file_end
-        
-        # If current file starts AFTER desired end timestamp, we can stop looking,
-        # remaining files will also be outside of desired range
-        if file_start > end_ts:
-            break
-        
-        file_end = get_nsx_end_timestamp(nsx_fp)
-        
-        # If current file ends after or at the desired start timestamp,
-        # it means this file contains data within our desired range
-        if file_end >= start_ts:
+        #                  start_ts                          end_ts
+        #  |                   |
+        #  period_start        period_end
+
+        # A period overlaps the range if it starts at or before end_ts and ends at or after start_ts.
+        # Periods aren't ordered in time across (or within) files, so every file has to be checked
+        if any(period_start <= end_ts and period_end >= start_ts for period_start, period_end in periods):
+            # stream_nsx_data assumes timestamps only increase, so data from a multi-period file may be incomplete
+            # or out of order once stitched
+            if len(all_periods) > 1:
+                warnings.warn(f'NsX file in range has {len(all_periods)} periods (timestamps reset mid-file); '
+                              f'stitched data from it may be incomplete or out of order. \n  {nsx_fp}')
             files.append(nsx_fp)
-    
+
     return files
 
 
