@@ -47,22 +47,16 @@ def ambiguous_window_error(periods, matches, start_ts, end_ts, source):
     )
 
 
-def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
+def iter_nev_pages(nev_file, first_packet=0, last_packet=None):
     """
-    Iterator that sequentially yields all the packets saved in the NeV files.
-    
-    This function uses np.memmap to efficiently load the data packets from the file in a memory-mapped way. 
-    The data is processed in sections defined by DATA_PAGING_SIZE to avoid memory issues.
+    Memory-map the NeV file's data packets page by page (DATA_PAGING_SIZE packets at a time).
 
-    :param nev_file:       NevFile object (defined in brpylib.py) from which to stream packets
-    :param start_ts:       [optional] {float} Starting time in seconds on NSP clock to filter for. Default: 0.0
-    :param end_ts:         [optional] {float} Ending time in seconds on NSP clock to filter for. Default: None
-    :param packet_type:    [optional] {int}   Packet ID to filter for. Default: None
-    :yield:                {tuple}: ((timestamp, packet_id), data) A tuple containing the packet information 
-                                        - timestamp: {int} Timestamp of the packet
-                                        - packet_id: {int} Packet ID of the packet
-                                        - data: {bytes} Raw data of the packet as bytes
-    :raises OSError:       If there is an issue while accessing the file using np.memmap.
+    :param nev_file:     NevFile object (defined in brpylib.py)
+    :param first_packet: [optional] {int} index of the first packet to map. Default: 0
+    :param last_packet:  [optional] {int} index of the last packet to map (inclusive). Default: the file's last packet
+    :yield: (start_idx, raw_data), where start_idx is the index of the page's first packet and raw_data is a
+        structured array with 'timestamp', 'packet_id' and 'data' fields
+    :raises OSError: If there is an issue while accessing the file using np.memmap.
     """
 
     # Total number of bytes in both headers and a 0-indexed pointer to the first data packet
@@ -75,6 +69,8 @@ def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
     end_of_file = nev_file.datafile.tell()
 
     n_packets = int((end_of_file - end_of_header) / data_packet_size)
+    if last_packet is not None:
+        n_packets = min(n_packets, last_packet + 1)
 
     # Move fp to start of first data packet
     nev_file.datafile.seek(end_of_header, 0)
@@ -85,9 +81,9 @@ def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
         ('packet_id', '<u2'),  # np.uint16
         ('data', 'u1', data_packet_size - 10)
     ])
-    
+
     # Process data in the packet section by section to avoid memory issues
-    for start_idx in range(0, n_packets, DATA_PAGING_SIZE):
+    for start_idx in range(first_packet, n_packets, DATA_PAGING_SIZE):
         end_idx = min(start_idx + DATA_PAGING_SIZE, n_packets)
         try:
             raw_data = np.memmap(
@@ -96,11 +92,116 @@ def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
                 mode="r",
                 shape=(end_idx - start_idx,),
                 offset=end_of_header + start_idx * data_packet_size)
-                # [!] By default, memmap will start at the beginning of the file, 
+                # [!] By default, memmap will start at the beginning of the file,
                 # even if filename is a file pointer fp and fp.tell() != 0
                 # So we still need to explicitly set the offset to the start of the data packets
         except OSError as e:
             raise e
+
+        yield start_idx, raw_data
+
+
+def iter_nev_periods(nev_file, tol_s=RESET_TOL_S):
+    """
+    Split the NeV file into clock periods by packet position.
+
+    A new period begins at a packet whose timestamp is more than tol_s seconds below the highest timestamp seen so
+    far in the current period (e.g. the NSP clock was reset mid-file). Smaller backward steps (out of order packets)
+    and gaps that move forward in time stay in the same period. This is the same tolerance as iter_nsx_periods.
+
+    :param nev_file: NevFile object (defined in brpylib.py)
+    :param tol_s:    [optional] {float} how far back (in seconds) a packet can be and stay in the same period
+    :yield: (period_index, first_ts, last_ts, first_packet_idx, last_packet_idx), in file order. first_ts and
+        last_ts are the period's lowest and highest packet timestamps. The packet indices are the positions in the
+        file's data section of the period's first and last packets (inclusive)
+    """
+    tol = np.uint64(int(tol_s * nev_file.basic_header['TimeStampResolution']))
+
+    period = None
+    run_max = None  # Highest timestamp seen so far in the current period
+    for start_idx, raw_data in iter_nev_pages(nev_file):
+        timestamps = np.asarray(raw_data['timestamp'])
+        i = 0
+        while i < len(timestamps):
+            if period is None:
+                # The first packet of the file starts the first period
+                period = [0, timestamps[i], timestamps[i], start_idx + i, start_idx + i]
+                run_max = timestamps[i]
+
+            # Running max of the current period before each packet. Comparing ts + tol avoids uint64 underflow
+            segment = timestamps[i:]
+            cum_max = np.maximum.accumulate(np.concatenate(([run_max], segment)))
+            drops = np.nonzero(segment + tol < cum_max[:-1])[0]
+            n_same = drops[0] if drops.size else len(segment)
+
+            # Extend the current period with the packets before the drop (if any)
+            if n_same:
+                period[1] = min(period[1], segment[:n_same].min())
+                period[2] = max(period[2], cum_max[n_same])
+                period[4] = start_idx + i + n_same - 1
+                run_max = cum_max[n_same]
+            if not drops.size:
+                break
+
+            # Time went backwards, start a new period
+            yield tuple(int(v) for v in period)
+            i += n_same
+            period = [period[0] + 1, timestamps[i], timestamps[i], start_idx + i, start_idx + i]
+            run_max = timestamps[i]
+    if period is not None:
+        yield tuple(int(v) for v in period)
+
+
+def stream_nev_packets(nev_file, start_ts=None, end_ts=None, packet_type=None, period=None):
+    """
+    Iterator that sequentially yields all the packets saved in the NeV files.
+
+    This function uses np.memmap to efficiently load the data packets from the file in a memory-mapped way.
+    The data is processed in sections defined by DATA_PAGING_SIZE to avoid memory issues.
+
+    If the file has more than one period (the NSP clock was reset mid-file, see iter_nev_periods) the same
+    timestamps can occur in more than one of them. Without period=, the window must then match only one period,
+    and only that period is read. Files with a single period are read exactly as before.
+
+    :param nev_file:       NevFile object (defined in brpylib.py) from which to stream packets
+    :param start_ts:       [optional] {int} Starting timestamp on NSP clock to filter for. Default: None
+    :param end_ts:         [optional] {int} Ending timestamp on NSP clock to filter for. Default: None
+    :param packet_type:    [optional] {int}   Packet ID to filter for. Default: None
+    :param period:         [optional] index into the file's list of periods (as yielded by iter_nev_periods, e.g. -1
+                           for the last period). If given, only that period's packets are read
+    :yield:                {tuple}: ((timestamp, packet_id), data) A tuple containing the packet information
+                                        - timestamp: {int} Timestamp of the packet
+                                        - packet_id: {int} Packet ID of the packet
+                                        - data: {bytes} Raw data of the packet as bytes
+    :raises OSError:       If there is an issue while accessing the file using np.memmap.
+    :raises AmbiguousWindowError: If period is None and the window matches more than one of the file's periods
+    """
+
+    # Work out which of the file's clock periods to read. With no window and no period, the whole file is read
+    windowed = start_ts is not None or end_ts is not None
+    periods = None
+    if period is None and windowed:
+        periods = list(iter_nev_periods(nev_file))
+        if len(periods) > 1:
+            spans = [(first_ts, last_ts) for _, first_ts, last_ts, _, _ in periods]
+            matches = periods_in_window(spans, start_ts, end_ts)
+            if len(matches) > 1:
+                raise ambiguous_window_error(spans, matches, start_ts, end_ts, nev_file.datafile.name)
+            if not matches:
+                return  # The window isn't in this file
+            period = matches[0]
+
+    # If we're reading one period, read only from its first packet up to its last
+    first_packet, last_packet = 0, None
+    if period is not None:
+        if periods is None:
+            periods = list(iter_nev_periods(nev_file))
+        try:
+            _, _, _, first_packet, last_packet = periods[period]
+        except IndexError:
+            return  # This file doesn't have the requested period
+
+    for _, raw_data in iter_nev_pages(nev_file, first_packet, last_packet):
 
         # Boolean masks to filter packet type and timestamp
         mask_packet_type = raw_data['packet_id'] == packet_type if packet_type is not None else True
@@ -108,8 +209,10 @@ def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
         mask_end = raw_data['timestamp'] <= end_ts if end_ts is not None else True
 
         mask_combined = mask_start & mask_end & mask_packet_type
-
-        filtered_data = raw_data[mask_combined]
+        if mask_combined is True:
+            filtered_data = raw_data
+        else:
+            filtered_data = raw_data[mask_combined]
 
         for timestamp, packet_id, data in filtered_data:
             yield (timestamp, packet_id), data.tobytes()
