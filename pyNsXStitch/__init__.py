@@ -4,6 +4,7 @@ from pyNsXStitch.helpers import (
     get_all_streamed_files,
     find_nsx_in_range,
     get_nev_rec_start,
+    get_nev_rec_starts,
     search_nev_comments,
     get_nsx_start_timestamp,
     get_nsx_end_timestamp,
