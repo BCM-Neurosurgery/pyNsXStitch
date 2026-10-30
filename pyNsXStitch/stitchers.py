@@ -1,3 +1,4 @@
+import warnings
 from datetime import datetime, timedelta
 from itertools import chain
 from struct import calcsize, unpack, pack
@@ -241,13 +242,23 @@ class StitchedNsXFile(object):
                 print(f'Processing new packet Timestamp: {start_ts}  NPoints:{n_points}')
 
                 stitch_w_prev = False
-                if self.concat_packets and last_ts is not None:
-                    # We're running in agressive stitching mode, so check for data drops
+                if last_ts is not None:
+                    # last_ts already points at the next expected tick, so a seamless join has a gap of about 0
                     packet_gap_ts = start_ts - last_ts
                     print(f'  Packet gap: {packet_gap_ts}')
-                    if packet_gap_ts <= ts_per_sample:
+                    if self.concat_packets and abs(packet_gap_ts) < 0.5 * ts_per_sample:
+                        # We're running in agressive stitching mode and no samples were missed between packets
                         print(f'  Concatenating packets')
-                        stitch_w_prev = True  # No samples were missed between packets
+                        stitch_w_prev = True
+                    elif packet_gap_ts <= -0.5 * ts_per_sample:
+                        # Packets overlap; start a new packet so every sample keeps its true tick. The overlapping
+                        # samples are written twice and are not checked for matching data
+                        n_overlap = -packet_gap_ts / ts_per_sample
+                        warnings.warn(
+                            f'NSx packet at timestamp {start_ts} overlaps the previous packet by {-packet_gap_ts} '
+                            f'ticks (~{n_overlap:.1f} samples). Writing it as a new packet; the overlapping '
+                            f'samples will appear twice in the output'
+                        )
 
                 if stitch_w_prev:
                     # We write this packet as part of the previous packet, update the previous packet header with
@@ -274,7 +285,9 @@ class StitchedNsXFile(object):
                     last_ts = start_ts  # Reset the ts counter to the start of this packet
 
             out_file.write(data_block)
-            last_ts += len(data_block) * ts_per_sample  # Increment ts counter to timestamp of the last written point
+            if last_ts is not None:
+                # Increment ts counter to the expected timestamp of the next point
+                last_ts += len(data_block) * ts_per_sample
 
             loop_end = datetime.now()
             loop_duration = loop_end - prev_loop_t
