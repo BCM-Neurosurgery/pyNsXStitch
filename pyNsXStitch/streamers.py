@@ -132,22 +132,25 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
 
         # Determine whether we should read this packet from the file
         packet_end_ts = timestamp + int(round(packet_pts * ts_ratio))
-        if read_start_ts and packet_end_ts < read_start_ts:
+        if read_start_ts is not None and packet_end_ts < read_start_ts:
             packet_size = packet_pts*data_point_size
             nsx_file.datafile.seek(packet_size, 1)
             continue  # This entire packet is before the read start timestamp. Move to the next packet
-        if read_end_ts and read_end_ts < timestamp:
+        if read_end_ts is not None and read_end_ts < timestamp:
             break  # This packet is past the end of the requested interval. Finish
 
         # Determine the altered start of the read if the start timestamp is within this packet
-        start_ts = max(read_start_ts, timestamp) if read_start_ts else timestamp
+        start_ts = max(read_start_ts, timestamp) if read_start_ts is not None else timestamp
         n_points_to_skip = int(np.floor(abs(start_ts - timestamp) / ts_ratio))
         read_start = packet_start + n_points_to_skip * data_point_size
         nsx_file.datafile.seek(read_start, 0)
 
-        # Determine the altered end of the read in this packet if the end timestamp is in this packet
-        end_ts = min(read_end_ts, packet_end_ts) if read_end_ts else packet_end_ts
-        read_end = packet_start + int(np.ceil(abs(end_ts - timestamp)/ts_ratio)) * data_point_size
+        # Determine the altered end of the read in this packet if the end timestamp is in this packet.
+        # The window end is inclusive: the sample at end_ts is read. Clamp to the packet's sample count,
+        # since packet_end_ts is one sample period past the packet's last sample.
+        end_ts = min(read_end_ts, packet_end_ts) if read_end_ts is not None else packet_end_ts
+        n_end_points = min(int(np.floor(abs(end_ts - timestamp) / ts_ratio)) + 1, packet_pts)
+        read_end = packet_start + n_end_points * data_point_size
 
         # Determine the number of sections that will be needed to read all the data in this packet
         read_size = read_end - read_start
@@ -194,6 +197,13 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
 
             # Move the file pointer explicitly since np.memmap is unreliable
             nsx_file.datafile.seek(location + this_section_size, 0)
+
+        # The requested window ends within this packet. Finish
+        if read_end_ts is not None and read_end_ts <= packet_end_ts:
+            break
+
+        # Move to the next packet header from the packet boundary, not from read_end
+        nsx_file.datafile.seek(packet_start + packet_pts * data_point_size, 0)
 
 
 def iter_nsx_timestamps(nsx_file):
