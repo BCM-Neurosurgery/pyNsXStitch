@@ -8,7 +8,10 @@ from pyNsXStitch.helpers import (
     get_nsx_start_timestamp,
     get_nsx_end_timestamp,
     get_nsx_duration,
+    get_nsx_periods,
     get_all_nev_comments,
 )
+from pyNsXStitch.periods import get_session_nsx_periods, find_nsx_parts_in_range
 from pyNsXStitch.stitchers import StitchedNeVFile, StitchedNsXFile  # Tier 1
+from pyNsXStitch.streamers import AmbiguousWindowError, iter_nsx_periods
 from pyNsXStitch.anonymizers import remove_audio_nsx  # Tier 2

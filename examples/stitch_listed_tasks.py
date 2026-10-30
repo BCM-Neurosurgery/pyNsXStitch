@@ -9,10 +9,12 @@ NeV/NsX files are written to their own per-task output folder.
 This is a simplified stub -- customise the comment matching / windowing logic by
 building your own script on the pyNsXStitch package. Run with --help for details.
 
-CSV format: 3 columns, no header assumptions beyond order --
+CSV format: 3 or 4 columns, no header assumptions beyond order --
     1. Date folder  (subfolder of source_dir containing that recording)
     2. EMU ID       (matched against comments as 'EMU-0<id>')
     3. Task Name    (used as the output subfolder and stitched file name)
+    4. Period       [optional] clock period index within the recording, counted in filename order. Only needed
+                    if the NSP clock was reset and the task's time window occurs more than once
 """
 import os
 
@@ -27,6 +29,8 @@ def stitch_listed_tasks(source_dir, output_dir, task_csv, aggressive=False):
 
     for _, task_data in tasks.iterrows():
         date_folder, emu_id, task_name = task_data.iloc[0], task_data.iloc[1], task_data.iloc[2]
+        period = task_data.iloc[3] if len(task_data) > 3 and pd.notna(task_data.iloc[3]) else None
+        period = int(period) if period is not None else None
 
         task_source_dir = os.path.join(source_dir, date_folder)
         streamed_file_list, all_comments = load_comments_in_folder(task_source_dir)
@@ -38,7 +42,7 @@ def stitch_listed_tasks(source_dir, output_dir, task_csv, aggressive=False):
         task_output_dir = os.path.join(output_dir, task_name)
         stitch_one_task(
             streamed_file_list, task_output_dir, task_name,
-            start_timestamp, end_timestamp, aggressive=aggressive
+            start_timestamp, end_timestamp, aggressive=aggressive, period=period
         )
 
 
@@ -54,7 +58,7 @@ if __name__ == '__main__':
     arg_parser.add_argument('output_dir', type=str,
                             help='Base directory to write per-task output folders into')
     arg_parser.add_argument('task_csv', type=str,
-                            help='CSV listing tasks: columns "Date folder", "EMU ID", "Task Name"')
+                            help='CSV listing tasks: columns "Date folder", "EMU ID", "Task Name", and optionally "Period"')
     arg_parser.add_argument('--aggressive', action='store_true',
                             help='Merge adjacent packets with no sample gap (fewer packet boundaries)')
     args = arg_parser.parse_args()

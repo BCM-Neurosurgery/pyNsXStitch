@@ -106,6 +106,16 @@ value will be `None`. In all cases, the packet data is a numpy memory_map of the
 end of the packet then it will be truncated.
   - `iter_nsx_timestamps`: Quickly iterate through all the packets in an NsX file, returning only the headers. Useful 
 primarily for checking the size and duration of the NsX file, as well as assessing data drop rates
+  - `iter_nsx_periods`: Split an NsX file into clock periods. A new period starts when a packet starts more than
+`tol_s` (default 1 s) before the previous one ended (the NSP clock was reset)
+
+### Clock resets
+If the NSP clock is reset during a recording, timestamps start over, so the same time window can occur more than
+once. The NsX functions (`stream_nsx_data`, `StitchedNsXFile`, `find_nsx_in_range`, `stitch_one_task`) take an
+optional `period=` argument to choose which occurrence to use. `stream_nsx_data` counts periods within the one file;
+the others count them across the whole session, in filename order (see `get_session_nsx_periods`). If `period` is
+not given and the window matches more than one period, an `AmbiguousWindowError` is raised rather than mixing data
+from different periods. Recordings without a clock reset are unaffected. NeV files are not yet split by period.
 
 ### Anonymizers
 Collection of functions and tools useful for anonymizing BRK data files and stripping out PHI.

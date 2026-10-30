@@ -16,7 +16,7 @@ import xml.etree.ElementTree as xml
 from pyNsXStitch.stitchers import StitchedNsXFile, StitchedNeVFile
 from pyNsXStitch.helpers import get_all_nev_comments, get_all_streamed_files, get_nev_rec_start, \
     find_nsx_in_range, get_support_files
-from pyNsXStitch.streamers import stream_nev_packets
+from pyNsXStitch.streamers import stream_nev_packets, AmbiguousWindowError
 
 
 def run_stitch_async(gui):
@@ -34,6 +34,15 @@ def run_stitch_async(gui):
                       '  Are you sure it has been selected correctly?\n')
             return
 
+        # Find the NsX files to stitch before writing anything, so an ambiguous window fails early
+        nsx_files = {filetype: files for filetype, files in gui.streamed_files.items() if 'ns' in filetype.lower()}
+        try:
+            in_range = {filetype: find_nsx_in_range(files, start, end) for filetype, files in nsx_files.items()}
+        except AmbiguousWindowError as e:
+            gui.error('The NSP clock was reset during this recording, and the selected time range occurs more '
+                      f'than once. Stitch it with stitch_one_task(..., period=...) instead.\n  {e}\n')
+            return
+
         # Stitch the NeV files first
         gui.notify('Stitching NeV files...')
         gui.update_progressbar(0)
@@ -45,15 +54,14 @@ def run_stitch_async(gui):
 
         # Stitch each of the NsX filetypes
         gui.notify('Beginning NsX stitching...')
-        nsx_files = {filetype: files for filetype, files in gui.streamed_files.items() if 'ns' in filetype.lower()}
         for filetype, files in nsx_files.items():
             gui.update_progressbar(0)
             gui.notify(f'Stitching from {len(files)} {filetype} files')
-            in_range = find_nsx_in_range(files, start, end)
-            gui.notify(f'Found {len(in_range)} files in the selected time range')
-            if in_range:
+            gui.notify(f'Found {len(in_range[filetype])} files in the selected time range')
+            if in_range[filetype]:
                 nsx_start = datetime.now()
-                nsx_stitch = StitchedNsXFile(in_range, start, end, aggressive_concat=gui.aggressive_stitch.get())
+                nsx_stitch = StitchedNsXFile(in_range[filetype], start, end,
+                                             aggressive_concat=gui.aggressive_stitch.get())
                 with open(gui.get_out_filepath(filetype.lower()), 'wb+') as nsx_out:
                     nsx_stitch.write(nsx_out, gui_updater=gui.update_progressbar)
                 elapsed = (datetime.now() - nsx_start)
