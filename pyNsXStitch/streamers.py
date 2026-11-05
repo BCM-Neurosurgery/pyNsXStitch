@@ -97,6 +97,8 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
     out-of-memory constraints we do not copy the entire packet at once, but rather stream packet data out section by
     section. These sections are of fixe maximum size, and the size is set by DATA_PAGING_SIZE
 
+    Note: Behavior of this function has been modified slightly to ensure that data are drawn from [read_start_ts, read_stop_ts]. Previous version of function would return the first sample at or OUTSIDE the requested
+
     :param nsx_file:
     :param read_start_ts:  [optional]
     :param read_end_ts:    [optional]
@@ -209,10 +211,7 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
             # Move the file pointer explicitly since np.memmap is unreliable
             nsx_file.datafile.seek(location + this_section_size, 0)
 
-        # The requested window ends within this packet. Finish. Strict since packet_end_ts is where the next
-        # packet's first sample would be, and the window end is inclusive
-        if read_end_ts is not None and read_end_ts < packet_end_ts:
-            break
+
 
         # Move to the next packet header from the packet boundary, not from read_end
         nsx_file.datafile.seek(packet_start + packet_pts * data_point_size, 0)

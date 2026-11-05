@@ -139,6 +139,7 @@ class StitchedNsXFile(object):
 
             # Packet timestamps are re-packed in the origin file's format, so mixing
             # 2.x (uint32) and 3.x (uint64) files would corrupt the output
+            # Likely Overkill but we are keeping
             self.ts_fmt = nsx_timestamp_fmt(origin)
             for filename in self.files[1:]:
                 nsx_file = NsxFile(filename, verbose=False, interactive=False)
