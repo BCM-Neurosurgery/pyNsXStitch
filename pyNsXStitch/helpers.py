@@ -8,16 +8,20 @@ import warnings
 
 import numpy as np
 from brpylib import NevFile, NsxFile
+from brpylib.brpylib import NSX_BASIC_HEADER_BYTES_22, NSX_EXT_HEADER_BYTES_22, nsx_header_dict, \
+    format_none, format_stripstring, format_freq, format_filter, format_timeorigin, format_filespec
 
-from struct import unpack
+from struct import pack, unpack, calcsize
 
 import pandas as pd
 
 from pyNsXStitch.stitchers import StitchedNeVFile, StitchedNsXFile
-from pyNsXStitch.streamers import stream_nev_packets, iter_nsx_timestamps
+from pyNsXStitch.streamers import stream_nev_packets, iter_nsx_timestamps, stream_nsx_data, nsx_timestamp_fmt
 
 nsx_copy_headers = []
 REC_EVENT_PACKET_ID = 65529
+
+_NSX_FILTER_CODES = {'none': 0, 'butterworth': 1, None: 0}
 
 
 def get_all_streamed_files(directory, full_paths=False):
@@ -84,7 +88,7 @@ def get_nsx_duration(nsx_filepath):
 
 def get_nsx_end_timestamp(nsx_filepath):
     """Return the end of the NsX file in time elapsed (seconds) since the recording start"""
-    nsx_file = NsxFile(nsx_filepath)
+    nsx_file = NsxFile(nsx_filepath, verbose=False, interactive=False)
     last_ts, packet_size = None, None
     for timestamp, packet_points in iter_nsx_timestamps(nsx_file):
         last_ts = timestamp
@@ -101,10 +105,11 @@ def get_nsx_end_timestamp(nsx_filepath):
 def get_nsx_start_timestamp(nsx_filepath):
     """Get the start time (in seconds) of this data file from the header of the first data packet"""
     try:
-        nsx = NsxFile(nsx_filepath)
+        nsx = NsxFile(nsx_filepath, verbose=False, interactive=False)
         end_of_header = nsx.basic_header["BytesInHeader"]
         nsx.datafile.seek(end_of_header + 1, 0)  # Move to the start of data, also skipping the null byte
-        timestamp = unpack("<Q", nsx.datafile.read(8))[0]
+        ts_fmt = nsx_timestamp_fmt(nsx)
+        timestamp = unpack(ts_fmt, nsx.datafile.read(calcsize(ts_fmt)))[0]
         return timestamp
     except Exception as e:
         raise e
@@ -159,7 +164,7 @@ def get_time_in_file(nsx_file, timestamp):
 
 def get_all_nev_comments(nev_filenames, gui_updater=None):
     """Get a data frame of all the comments in the listed NeV files"""
-    nev_files = [NevFile(fp) for fp in nev_filenames]
+    nev_files = [NevFile(fp, verbose=False, interactive=False) for fp in nev_filenames]
 
     # Read in all the comments from all the files
     all_easy_read = []
@@ -177,7 +182,10 @@ def get_all_nev_comments(nev_filenames, gui_updater=None):
             warnings.warn(f'Found no comments in NeV file! \n  {nev_filenames[i]}')
             continue
         all_easy_read.append(easy_read)
-    easy_read = pd.concat(all_easy_read)
+    if all_easy_read:
+        easy_read = pd.concat(all_easy_read)
+    else:
+        easy_read = pd.DataFrame.from_dict({'CharSet': [], 'Flag': [], 'Data': [], 'Comment': []})
     return easy_read
 
 
@@ -244,9 +252,8 @@ def load_comments_in_folder(source_dir):
     print(f'Found {len(streamed_files["NeV"])} NeV files')
 
     # Iter through all the comment packets in all files
-    print(f'Loading comments from NeV...')
-    timestamps, comments, file_names = [], [], []
-    n_files = len(streamed_files["NeV"])
+    print('Loading comments from NeV...')
+    timestamps, comments = [], []
     for i, file in enumerate(streamed_files["NeV"]):
         nev = NevFile(file)
         for (ts, packet_id), raw_data in stream_nev_packets(nev, packet_type=65535):
@@ -264,6 +271,143 @@ def load_comments_in_folder(source_dir):
         'Comment': comments
     })
     return streamed_files, cleaned_df
+
+
+def write_one_nev_file(nev_file: NevFile, output_path: str):
+    """
+    Write an in-memory NevFile object (from brpylib.py) out to disk as a standalone .nev file.
+
+    Copies the header verbatim, then re-writes every data packet found by stream_nev_packets.
+
+    :param nev_file: NevFile object (defined in brpylib.py) to write out
+    :param output_path: Path of the .nev file to write
+    """
+    print('Saving...')
+    with open(output_path, 'wb') as out_file:
+        # Copy the header from the origin file
+        nev_file.datafile.seek(0, 0)
+        out_file.seek(0, 0)
+        header_size = nev_file.basic_header['BytesInHeader']
+        out_file.write(nev_file.datafile.read(header_size))
+
+        # Write all the data packets in order
+        for (timestamp, packet_id), packet in stream_nev_packets(nev_file):
+            out_file.write(pack('<Q', timestamp))
+            out_file.write(pack('<H', packet_id))
+            out_file.write(packet)
+    print(f'Saved anonymized file to {output_path}')
+
+def _fixed_str(value: str, length: int) -> bytes:
+    """Encode a string to a fixed-width, null-padded byte field (inverse of brpylib.format_stripstring)."""
+    return (value or '').encode('latin-1')[:length].ljust(length, b'\x00')
+
+
+def _freq_to_uint(value) -> int:
+    """Inverse of brpylib.format_freq, which renders a milli-Hz uint as e.g. '300.0 Hz'."""
+    if value is None:
+        return 0
+    return int(round(float(str(value).split(' ')[0]) * 1000))
+
+
+def _timeorigin_bytes(dt) -> bytes:
+    """
+    Inverse of brpylib.format_timeorigin: 8 x uint16 Windows SYSTEMTIME
+    (year, month, day-of-week, day, hour, minute, second, millisecond).
+    SYSTEMTIME's wDayOfWeek is 0=Sunday..6=Saturday.
+    """
+    return pack('<8H', dt.year, dt.month, dt.isoweekday() % 7, dt.day,
+                dt.hour, dt.minute, dt.second, dt.microsecond // 1000)
+
+
+def _pack_filespec(value, fmt: str) -> bytes:
+    """Inverse of brpylib.format_filespec, which renders 2 raw uint8 as e.g. '2.3'."""
+    major, minor = (int(p) for p in str(value).split('.'))
+    return pack('<' + fmt, major, minor)
+
+
+# Maps each brpylib format_* function (as used in nsx_header_dict field defs) to its inverse,
+# so header field layout/order/widths stay driven by brpylib's own field lists rather than
+# being re-typed here. Each inverse takes (value, struct_fmt_for_this_field) -> bytes.
+_INVERSE_FORMATTERS = {
+    format_none: lambda value, fmt: pack('<' + fmt, value),
+    format_stripstring: lambda value, fmt: _fixed_str(value, calcsize(fmt)),
+    format_freq: lambda value, fmt: pack('<' + fmt, _freq_to_uint(value)),
+    format_filter: lambda value, fmt: pack('<' + fmt, _NSX_FILTER_CODES[value]),
+    format_timeorigin: lambda value, fmt: _timeorigin_bytes(value),
+    format_filespec: _pack_filespec,
+}
+
+
+def pack_header(fields, values: dict) -> bytes:
+    """
+    Inverse of brpylib.processheaders: pack a header dict back into its on-disk binary form,
+    using the same field-def list (e.g. ``nsx_header_dict['basic']``) that was used to read it.
+    """
+    return b''.join(_INVERSE_FORMATTERS[fun](values[name], fmt) for name, fmt, fun in fields)
+
+
+def _nsx_header_bytes(nsx_file: NsxFile, keep_indices: list) -> bytes:
+    """
+    Serialise the NsX header block (basic + extended headers) for the channels at
+    ``keep_indices``, entirely from the in-memory ``nsx_file.basic_header`` /
+    ``nsx_file.extended_headers``. The source file is never re-read, so edits already
+    applied to those dicts (e.g. a scrambled ``TimeOrigin``) are carried through. Only
+    ``BytesInHeader`` and ``ChannelCount`` are recomputed for the reduced channel set.
+    """
+    bh = nsx_file.basic_header
+    if bh['FileTypeID'] not in ('BRSMPGRP', 'NEURALCD'):
+        raise TypeError(f'Only BRSMPGRP/NEURALCD type NsX files are supported (found {bh["FileTypeID"]})')
+
+    kept_ext = [nsx_file.extended_headers[i] for i in keep_indices]
+    n_keep = len(kept_ext)
+    new_bytes_in_header = NSX_BASIC_HEADER_BYTES_22 + NSX_EXT_HEADER_BYTES_22 * n_keep
+
+    basic_values = dict(bh, BytesInHeader=new_bytes_in_header, ChannelCount=n_keep)
+    header = bytearray(_fixed_str(bh['FileTypeID'], 8))
+    header += pack_header(nsx_header_dict['basic'], basic_values)
+    for ext in kept_ext:
+        header += pack_header(nsx_header_dict['extended'], ext)
+
+    if len(header) != new_bytes_in_header:
+        raise ValueError(f'Rebuilt NsX header is {len(header)} bytes, expected {new_bytes_in_header}')
+    return bytes(header)
+
+
+def write_one_nsx_file(nsx_file: NsxFile, output_path: str, keep_indices=None):
+    """
+    Write an in-memory NsxFile object (from brpylib.py) out to disk as a standalone NsX file.
+
+    The header is re-serialised from ``nsx_file.basic_header`` / ``nsx_file.extended_headers``
+    so any edits to those dicts are preserved. The data section is streamed packet-by-packet
+    via ``stream_nsx_data``, so files of arbitrary size are written with bounded memory.
+    ``stream_nsx_data`` parses the 64-bit packet timestamps of filespec >= 3.0 files, which
+    ``NsxFile.savesubsetnsx`` does not.
+
+    :param nsx_file: source NsxFile object (BRSMPGRP or NEURALCD, filespec >= 2.2)
+    :param output_path: path of the NsX file to write
+    :param keep_indices: [optional] channel indices (positions in
+        ``nsx_file.extended_headers``) to retain; ``None`` keeps every channel
+    """
+
+    print('Saving...')
+    if keep_indices is None:
+        keep_indices = list(range(nsx_file.basic_header['ChannelCount']))
+
+    ts_fmt = nsx_timestamp_fmt(nsx_file)
+
+    with open(output_path, 'wb') as out_file:
+        out_file.write(_nsx_header_bytes(nsx_file, keep_indices))
+
+        # Stream the (potentially tens of GB) data section, slicing out kept channel columns
+        for meta, data_block in stream_nsx_data(nsx_file):
+            if meta is not None:
+                start_ts, n_points = meta
+                out_file.write(b'\x01')
+                out_file.write(pack(ts_fmt, start_ts))
+                out_file.write(pack('<I', n_points))
+            out_file.write(np.ascontiguousarray(data_block[:, keep_indices]).tobytes())
+
+    print(f'Saved anonymized file to {output_path}')
 
 
 def stitch_one_task(streamed_files, output_dir, task_name, start, end, aggressive=False):
@@ -292,3 +436,4 @@ def stitch_one_task(streamed_files, output_dir, task_name, start, end, aggressiv
             raise IndexError('Could not find enough files to stitch!')
 
     print(f'Finished {task_name}')
+

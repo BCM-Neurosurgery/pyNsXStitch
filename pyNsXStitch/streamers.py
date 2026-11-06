@@ -1,11 +1,24 @@
 import os
 from math import ceil
-from struct import unpack
+from struct import unpack, calcsize
 import numpy as np
 from brpylib.brpylib import DATA_BYTE_SIZE
 
 TIMESTAMP_BYTE_SIZE = 8
 DATA_PAGING_SIZE = 1024**2
+
+# Per-packet timestamp width in the NsX data section. FileSpec >= 3.0 (BRSMPGRP) packets carry
+# a 64-bit PTP timestamp; FileSpec 2.2/2.3 (NEURALCD) packets carry a 32-bit timestamp (see
+# brpylib.nsx_header_dict['data']). FileSpec 2.1 (NEURALSG) has no per-packet framing at all
+# and is not covered here.
+NSX_PTP_TS_FMT = '<Q'
+NSX_LEGACY_TS_FMT = '<I'
+
+
+def nsx_timestamp_fmt(nsx_file) -> str:
+    """Struct format for this NsX file's per-packet timestamp field, based on its FileSpec major version."""
+    major = int(str(nsx_file.basic_header['FileSpec']).split('.')[0])
+    return NSX_PTP_TS_FMT if major >= 3 else NSX_LEGACY_TS_FMT
 
 def stream_nev_packets(nev_file, start_ts=0, end_ts=None, packet_type=None):
     """
@@ -84,6 +97,8 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
     out-of-memory constraints we do not copy the entire packet at once, but rather stream packet data out section by
     section. These sections are of fixe maximum size, and the size is set by DATA_PAGING_SIZE
 
+    Note: Behavior of this function has been modified slightly to ensure that data are drawn from [read_start_ts, read_stop_ts]. Previous version of function would return the first sample at or OUTSIDE the requested
+
     :param nsx_file:
     :param read_start_ts:  [optional]
     :param read_end_ts:    [optional]
@@ -96,6 +111,8 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
     ts_ratio = ts_freq / sample_freq
     n_channels = nsx_file.basic_header["ChannelCount"]
     data_point_size = n_channels * DATA_BYTE_SIZE
+    ts_fmt = nsx_timestamp_fmt(nsx_file)
+    ts_size = calcsize(ts_fmt)
     nsx_file.datafile.seek(0, 0)
     section_size = (DATA_PAGING_SIZE // data_point_size) * data_point_size
 
@@ -109,7 +126,7 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
 
         # Get the time and length of this data packet
         nsx_file.datafile.seek(1, 1)
-        timestamp = unpack("<Q", nsx_file.datafile.read(8))[0]
+        timestamp = unpack(ts_fmt, nsx_file.datafile.read(ts_size))[0]
         packet_pts = unpack("<I", nsx_file.datafile.read(4))[0]
         packet_start = nsx_file.datafile.tell()
         if packet_pts == 0:
@@ -117,22 +134,36 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
 
         # Determine whether we should read this packet from the file
         packet_end_ts = timestamp + int(round(packet_pts * ts_ratio))
-        if read_start_ts and packet_end_ts < read_start_ts:
+        if read_start_ts is not None and packet_end_ts < read_start_ts:
             packet_size = packet_pts*data_point_size
             nsx_file.datafile.seek(packet_size, 1)
             continue  # This entire packet is before the read start timestamp. Move to the next packet
-        if read_end_ts and read_end_ts < timestamp:
+        if read_end_ts is not None and read_end_ts < timestamp:
             break  # This packet is past the end of the requested interval. Finish
 
-        # Determine the altered start of the read if the start timestamp is within this packet
-        start_ts = max(read_start_ts, timestamp) if read_start_ts else timestamp
-        n_points_to_skip = int(np.floor(abs(start_ts - timestamp) / ts_ratio))
+        # Determine the altered start of the read if the start timestamp is within this packet. Start at the first
+        # sample on or after read_start_ts, and report that sample's tick (not read_start_ts) as the packet start.
+        # Sample k sits at tick timestamp + round(k * ts_ratio); the floor is done in integers to avoid float error
+        # when ts_ratio is not a whole number (e.g. nanosecond PTP clocks)
+        start_ts = max(read_start_ts, timestamp) if read_start_ts is not None else timestamp
+        start_offset = start_ts - timestamp
+        n_points_to_skip = int((start_offset * sample_freq) // ts_freq)
+        if int(round(n_points_to_skip * ts_ratio)) < start_offset:
+            n_points_to_skip += 1
+        start_ts = timestamp + int(round(n_points_to_skip * ts_ratio))
         read_start = packet_start + n_points_to_skip * data_point_size
         nsx_file.datafile.seek(read_start, 0)
 
-        # Determine the altered end of the read in this packet if the end timestamp is in this packet
-        end_ts = min(read_end_ts, packet_end_ts) if read_end_ts else packet_end_ts
-        read_end = packet_start + int(np.ceil(abs(end_ts - timestamp)/ts_ratio)) * data_point_size
+        # Determine the altered end of the read in this packet if the end timestamp is in this packet.
+        # The window end is inclusive: the sample at end_ts is read. Clamp to the packet's sample count,
+        # since packet_end_ts is one sample period past the packet's last sample.
+        end_ts = min(read_end_ts, packet_end_ts) if read_end_ts is not None else packet_end_ts
+        end_offset = end_ts - timestamp
+        n_last_point = int((end_offset * sample_freq) // ts_freq)  # Index of the last sample on or before end_ts
+        if int(round((n_last_point + 1) * ts_ratio)) <= end_offset:
+            n_last_point += 1
+        n_end_points = min(n_last_point + 1, packet_pts)
+        read_end = packet_start + n_end_points * data_point_size
 
         # Determine the number of sections that will be needed to read all the data in this packet
         read_size = read_end - read_start
@@ -181,15 +212,22 @@ def stream_nsx_data(nsx_file, read_start_ts=None, read_end_ts=None):
             nsx_file.datafile.seek(location + this_section_size, 0)
 
 
+
+        # Move to the next packet header from the packet boundary, not from read_end
+        nsx_file.datafile.seek(packet_start + packet_pts * data_point_size, 0)
+
+
 def iter_nsx_timestamps(nsx_file):
     """Loop through and quickly read off all the packet headers in an NsX file"""
     data_point_size = nsx_file.basic_header['ChannelCount'] * DATA_BYTE_SIZE
+    ts_fmt = nsx_timestamp_fmt(nsx_file)
+    ts_size = calcsize(ts_fmt)
 
     file_size = os.path.getsize(nsx_file.datafile.name)
     ts_pointer = nsx_file.basic_header['BytesInHeader'] + 1
     while ts_pointer < file_size:
         nsx_file.datafile.seek(ts_pointer, 0)
-        timestamp = unpack('<Q', nsx_file.datafile.read(8))[0]
+        timestamp = unpack(ts_fmt, nsx_file.datafile.read(ts_size))[0]
         packet_points = unpack('<I', nsx_file.datafile.read(4))[0]
 
         yield timestamp, packet_points
